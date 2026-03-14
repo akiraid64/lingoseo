@@ -12,6 +12,7 @@ import {
   optimizeSeoContent,
   generateHreflangTags,
   generateSitemapWithLocales,
+  calculateSeoScore,
 } from "@/lib/translation/seo-optimizer";
 
 interface FixerParams {
@@ -502,7 +503,7 @@ async function createSitemap(
   modelName: string
 ): Promise<FixResult | null> {
   try {
-    const sitemap = await generateSitemapWithLocales({
+    const sitemap = generateSitemapWithLocales({
       baseUrl: "",
       locales: ["en", ...targetLocales],
       pages: ["/"],

@@ -297,6 +297,42 @@ export default function DashboardPage() {
           <section className="mb-8 p-6 rounded-xl border border-[var(--border)] bg-[var(--card)]">
             <h2 className="text-lg font-semibold mb-4">3. Analysis Results</h2>
 
+            {/* SEO Score */}
+            <div className="flex items-center gap-6 mb-6 p-4 rounded-xl bg-[var(--muted)] border border-[var(--border)]">
+              <div className="text-center">
+                <div
+                  className={`text-5xl font-black ${
+                    analysis.score.grade === "A"
+                      ? "text-green-400"
+                      : analysis.score.grade === "B"
+                        ? "text-blue-400"
+                        : analysis.score.grade === "C"
+                          ? "text-yellow-400"
+                          : "text-red-400"
+                  }`}
+                >
+                  {analysis.score.grade}
+                </div>
+                <div className="text-xs text-[var(--muted-foreground)]">
+                  {analysis.score.total}/100
+                </div>
+              </div>
+              <div className="flex-1 grid grid-cols-2 gap-2 text-xs">
+                {Object.entries(analysis.score.breakdown).map(([key, val]) => (
+                  <div key={key} className="flex items-center justify-between">
+                    <span className="text-[var(--muted-foreground)] capitalize">
+                      {key.replace(/([A-Z])/g, " $1")}
+                    </span>
+                    <span
+                      className={`font-medium ${val >= 80 ? "text-green-400" : val >= 60 ? "text-yellow-400" : "text-red-400"}`}
+                    >
+                      {val}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {/* Summary cards */}
             <div className="grid grid-cols-3 gap-3 mb-6">
               <div className="p-4 rounded-lg bg-red-500/10 border border-red-500/30 text-center">

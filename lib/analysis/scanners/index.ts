@@ -4,7 +4,8 @@ import { randomUUID } from "crypto";
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;
 
-// Scan for missing or empty <title>
+// Scan for missing, empty, or incorrectly sized <title>
+// Standard: 50-60 characters (claude-seo / Google guidelines)
 export function scanTitle(
   filePath: string,
   $: CheerioAPI
@@ -20,15 +21,36 @@ export function scanTitle(
       filePath,
       message: "Missing <title> tag — critical for SEO ranking",
     });
-  } else if (!title.text().trim()) {
-    issues.push({
-      id: randomUUID(),
-      type: "missing-title",
-      severity: "critical",
-      filePath,
-      message: "Empty <title> tag — search engines need descriptive titles",
-      currentValue: "",
-    });
+  } else {
+    const text = title.text().trim();
+    if (!text) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-title",
+        severity: "critical",
+        filePath,
+        message: "Empty <title> tag — search engines need descriptive titles",
+        currentValue: "",
+      });
+    } else if (text.length < 30) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-title",
+        severity: "warning",
+        filePath,
+        message: `Title too short (${text.length} chars) — aim for 50-60 characters for full SERP display`,
+        currentValue: text,
+      });
+    } else if (text.length > 60) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-title",
+        severity: "warning",
+        filePath,
+        message: `Title too long (${text.length} chars) — Google truncates at ~60 chars in search results`,
+        currentValue: text,
+      });
+    }
   }
 
   return issues;
@@ -62,13 +84,22 @@ export function scanMetaDescription(
         message: "Empty meta description content",
         currentValue: "",
       });
-    } else if (content.length < 50) {
+    } else if (content.length < 150) {
       issues.push({
         id: randomUUID(),
         type: "missing-meta-description",
         severity: "warning",
         filePath,
-        message: `Meta description too short (${content.length} chars, recommend 120-160)`,
+        message: `Meta description too short (${content.length} chars) — aim for 150-160 characters for full SERP display`,
+        currentValue: content,
+      });
+    } else if (content.length > 160) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-meta-description",
+        severity: "info",
+        filePath,
+        message: `Meta description too long (${content.length} chars) — Google truncates at ~160 chars`,
         currentValue: content,
       });
     }
@@ -222,6 +253,123 @@ export function scanHeadings(
   return issues;
 }
 
+// Scan for missing canonical tag
+export function scanCanonical(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+  const canonical = $('link[rel="canonical"]');
+
+  if (canonical.length === 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-canonical",
+      severity: "warning",
+      filePath,
+      message:
+        "Missing canonical tag — required to prevent duplicate content penalties when serving multiple locales",
+    });
+  }
+
+  return issues;
+}
+
+// Scan for missing viewport meta (mobile SEO requirement)
+export function scanViewport(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+  const viewport = $('meta[name="viewport"]');
+
+  if (viewport.length === 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-viewport",
+      severity: "critical",
+      filePath,
+      message:
+        "Missing viewport meta tag — Google uses mobile-first indexing; this page will rank poorly on mobile",
+      suggestedFix: '<meta name="viewport" content="width=device-width, initial-scale=1" />',
+    });
+  }
+
+  return issues;
+}
+
+// Deprecated schema types (Google stopped supporting these)
+const DEPRECATED_SCHEMA_TYPES = new Set([
+  "HowTo",           // Deprecated Sept 2023
+  "FAQPage",         // Restricted to gov/health Aug 2023
+  "SpecialAnnouncement", // Deprecated July 2025
+  "CourseInfo",
+  "ClaimReview",
+  "VehicleListing",
+  "Dataset",
+]);
+
+// Scan for JSON-LD schema issues
+export function scanJsonLd(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+  const scripts = $('script[type="application/ld+json"]').toArray();
+
+  if (scripts.length === 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "invalid-schema",
+      severity: "info",
+      filePath,
+      message:
+        "No JSON-LD structured data found — schema markup increases likelihood of rich results and AI search citations by ~2.5x",
+    });
+    return issues;
+  }
+
+  for (const script of scripts) {
+    const raw = $(script).html() || "";
+    try {
+      const parsed = JSON.parse(raw);
+      const type = parsed["@type"] as string | undefined;
+
+      if (type && DEPRECATED_SCHEMA_TYPES.has(type)) {
+        issues.push({
+          id: randomUUID(),
+          type: "invalid-schema",
+          severity: "critical",
+          filePath,
+          message: `Deprecated schema type "${type}" detected — Google no longer uses this for rich results`,
+          currentValue: type,
+        });
+      }
+
+      // Check for missing @context
+      if (!parsed["@context"]) {
+        issues.push({
+          id: randomUUID(),
+          type: "invalid-schema",
+          severity: "warning",
+          filePath,
+          message: 'JSON-LD schema missing @context declaration (required: "https://schema.org")',
+        });
+      }
+    } catch {
+      issues.push({
+        id: randomUUID(),
+        type: "invalid-schema",
+        severity: "critical",
+        filePath,
+        message: "Invalid JSON-LD schema — syntax error prevents Google from parsing structured data",
+      });
+    }
+  }
+
+  return issues;
+}
+
 // Scan for untranslated aria-label attributes (screen reader text)
 export function scanAriaLabels(
   filePath: string,
@@ -316,6 +464,9 @@ export function runAllScanners(
     ...scanAltText(filePath, $),
     ...scanHtmlLang(filePath, $),
     ...scanHeadings(filePath, $),
+    ...scanCanonical(filePath, $),
+    ...scanViewport(filePath, $),
+    ...scanJsonLd(filePath, $),
     ...scanAriaLabels(filePath, $),
     ...scanSrOnly(filePath, $),
   ];

@@ -1,6 +1,7 @@
 import { readdir, readFile, stat } from "fs/promises";
 import { join, extname, relative } from "path";
 import { runAllScanners } from "./scanners";
+import { calculateSeoScore } from "@/lib/translation/seo-optimizer";
 import type { AnalysisResult, SeoIssue } from "@/types";
 
 const SCANNABLE_EXTENSIONS = new Set([
@@ -135,6 +136,8 @@ export async function analyzeRepo(
     info: allIssues.filter((i) => i.severity === "info").length,
   };
 
+  const score = calculateSeoScore(allIssues);
+
   return {
     repoUrl,
     repoName: repoUrl.split("/").slice(-2).join("/"),
@@ -142,6 +145,7 @@ export async function analyzeRepo(
     issues: allIssues,
     summary,
     localesDetected: locales,
+    score,
     timestamp: new Date().toISOString(),
   };
 }

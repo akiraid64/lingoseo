@@ -18,7 +18,10 @@ export type IssueType =
   | "missing-jsonld-localization"
   | "unoptimized-headings"
   | "untranslated-aria-labels"
-  | "untranslated-sr-only";
+  | "untranslated-sr-only"
+  | "missing-canonical"
+  | "missing-viewport"
+  | "invalid-schema";
 
 export interface SeoIssue {
   id: string;
@@ -31,6 +34,17 @@ export interface SeoIssue {
   suggestedFix?: string;
 }
 
+export interface SeoScore {
+  total: number;      // 0-100
+  grade: "A" | "B" | "C" | "D" | "F";
+  breakdown: {
+    technical: number;
+    onPage: number;
+    accessibility: number;
+    schema: number;
+  };
+}
+
 export interface AnalysisResult {
   repoUrl: string;
   repoName: string;
@@ -38,6 +52,7 @@ export interface AnalysisResult {
   issues: SeoIssue[];
   summary: Record<Severity, number>;
   localesDetected: string[];
+  score: SeoScore;
   timestamp: string;
 }
 
