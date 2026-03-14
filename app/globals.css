@@ -1,46 +1,193 @@
 @import "tailwindcss";
 
+/* ─── Design Tokens ─────────────────────────────── */
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #0a0a0f;
-  --card-foreground: #fafafa;
-  --primary: #3b82f6;
-  --primary-foreground: #fafafa;
-  --secondary: #1e1e2e;
-  --secondary-foreground: #a1a1aa;
-  --muted: #18181b;
-  --muted-foreground: #71717a;
-  --accent: #3b82f6;
-  --destructive: #ef4444;
-  --border: #27272a;
-  --ring: #3b82f6;
-  --radius: 0.5rem;
-  --success: #22c55e;
-  --warning: #eab308;
+  --bg:         #070707;
+  --bg-card:    #0C0C0A;
+  --bg-muted:   #111110;
+  --fg:         #E2DDD0;
+  --fg-muted:   #5A564E;
+  --fg-dim:     #302E28;
+  --accent:     #A8FF3E;
+  --accent-dim: #3A5A10;
+  --border:     #1C1C18;
+  --border-hi:  #2E2E28;
+
+  --font-display: var(--font-display, 'Bebas Neue', sans-serif);
+  --font-mono:    var(--font-mono, 'Space Mono', monospace);
+
+  /* legacy vars used in dashboard */
+  --background:         var(--bg);
+  --foreground:         var(--fg);
+  --card:               var(--bg-card);
+  --card-foreground:    var(--fg);
+  --primary:            var(--accent);
+  --primary-foreground: var(--bg);
+  --secondary:          var(--bg-muted);
+  --secondary-foreground: var(--fg-muted);
+  --muted:              var(--bg-muted);
+  --muted-foreground:   var(--fg-muted);
+  --destructive:        #FF4040;
+  --success:            var(--accent);
+  --warning:            #FFB340;
+  --radius:             0.25rem;
 }
 
-* {
+/* ─── Reset ─────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
+html { scroll-behavior: smooth; }
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-mono);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
 }
 
-/* Custom scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
+/* ─── Typography ─────────────────────────────────── */
+.font-display { font-family: var(--font-display); }
+.font-mono    { font-family: var(--font-mono); }
+
+/* ─── Scrollbar ──────────────────────────────────── */
+::-webkit-scrollbar       { width: 4px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border-hi); }
+
+/* ─── Grain overlay ──────────────────────────────── */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9999;
+  background-image: url("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAADIAAAAyCAMAAAAp4XiDAAAAUVBMVEWFhYWDg4N3d3dtbW17e3t1dXWBgYGHh4t5eXlzc3OLi4ubm5uVlZWPj4+NjY19fX2JiYl/f39ra2uRkZGZmZlpaWmXl5dvb29xcXGTk5NnZ2c8TV1mAAAAG3RSTlNAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEAvEOwtAAAFVklEQVR4XpWWB67c2BUFb3g557T/hRo9/WUMZHlgr4Bg8Z4qQgQJlHI4A8SzFVrapvmTF9O7dmYRFZ60YiBhJRCgh1FYhiLAmdvX0CzTOpNE77ME0Zty/nWWzchDtiqrmQDeuv3powQ5ta2eN0FY0InkqDD73lT9c9lEzwUNqgFHs9VQce3TVClFCQrSTfOiYkVJQBmpbq2L6iZavPnAPcoU0dSw0SUTqz/GtrGuXfbyyBniKykOWQWGqwwMA7QiYAxi+IlPdqo+hYHnUt5ZPfnsHJyNiDtnpJyayNBkF6cWoYGAMY92ZxzzEE16/W6RV7");
+  opacity: 0.025;
 }
-::-webkit-scrollbar-track {
-  background: var(--muted);
+
+/* ─── Scan-line animation ────────────────────────── */
+@keyframes scanline {
+  0%   { left: -20%; opacity: 0; }
+  3%   { opacity: 1; }
+  97%  { opacity: 1; }
+  100% { left: 110%; opacity: 0; }
 }
-::-webkit-scrollbar-thumb {
-  background: var(--border);
-  border-radius: 3px;
+
+.scan-line {
+  position: absolute;
+  top: 0;
+  left: -20%;
+  width: 15%;
+  height: 100%;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(168,255,62,0.03) 40%,
+    rgba(168,255,62,0.08) 50%,
+    rgba(168,255,62,0.03) 60%,
+    transparent 100%
+  );
+  pointer-events: none;
+  animation: scanline 4s linear infinite;
 }
+
+/* ─── Text reveal animations ─────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.reveal         { opacity: 0; animation: fadeUp 0.7s cubic-bezier(0.16,1,0.3,1) forwards; }
+.reveal-fade    { opacity: 0; animation: fadeIn 0.6s ease forwards; }
+.delay-1        { animation-delay: 0.1s; }
+.delay-2        { animation-delay: 0.22s; }
+.delay-3        { animation-delay: 0.36s; }
+.delay-4        { animation-delay: 0.52s; }
+.delay-5        { animation-delay: 0.68s; }
+.delay-6        { animation-delay: 0.84s; }
+
+/* ─── Cursor blink ───────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.cursor { animation: blink 1s step-end infinite; }
+
+/* ─── Marquee ────────────────────────────────────── */
+@keyframes marquee {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 28s linear infinite;
+}
+.marquee-track:hover { animation-play-state: paused; }
+
+/* ─── Accent line ────────────────────────────────── */
+.accent-line {
+  display: block;
+  width: 100%;
+  height: 1px;
+  background: linear-gradient(90deg, var(--accent), transparent);
+}
+
+/* ─── Card hover ─────────────────────────────────── */
+.card-hover {
+  transition: border-color 0.2s, background 0.2s, transform 0.2s;
+}
+.card-hover:hover {
+  border-color: var(--accent-dim);
+  background: #0F0F0D;
+  transform: translateY(-2px);
+}
+
+/* ─── Button ─────────────────────────────────────── */
+.btn-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--accent);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, transform 0.15s;
+}
+.btn-accent:hover  { opacity: 0.88; transform: translateY(-1px); }
+.btn-accent:active { transform: translateY(0); }
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: transparent;
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-weight: 400;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: 1px solid var(--border-hi);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+  text-decoration: none;
+}
+.btn-ghost:hover { color: var(--fg); border-color: var(--fg-muted); }
