@@ -295,6 +295,88 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
             break;
           }
 
+          case "untranslated-aria-labels": {
+            // Collect ALL aria-label strings in the file into one object
+            // then use lingo.dev's translateObject() — ONE call per locale
+            // translates ALL of them at once
+            if (!lingoApiKey || targetLocales.length === 0) break;
+
+            const ariaMap: Record<string, string> = {};
+            $("[aria-label]").each((i, el) => {
+              const val = $(el).attr("aria-label") || "";
+              if (val.trim()) ariaMap[`aria_${i}`] = val;
+            });
+
+            if (Object.keys(ariaMap).length === 0) {
+              fixedIssueIds.push(issue.id);
+              break;
+            }
+
+            for (const locale of targetLocales) {
+              // One translateObject call translates ALL aria strings at once
+              const translated = await translateObject(
+                lingoApiKey,
+                ariaMap,
+                "en",
+                locale
+              );
+
+              $("[aria-label]").each((i, el) => {
+                const key = `aria_${i}`;
+                if (translated[key]) {
+                  $(el).attr(`data-aria-${locale}`, translated[key]);
+                }
+              });
+            }
+
+            fixedIssueIds.push(issue.id);
+            break;
+          }
+
+          case "untranslated-sr-only": {
+            // Same pattern: collect ALL sr-only text → translateObject() → write back
+            if (!lingoApiKey || targetLocales.length === 0) break;
+
+            const srSelectors = [
+              ".sr-only",
+              ".visually-hidden",
+              ".screen-reader-only",
+              ".screen-reader-text",
+              '[class*="sr-only"]',
+              '[class*="visually-hidden"]',
+            ].join(", ");
+
+            const srMap: Record<string, string> = {};
+            $(srSelectors).each((i, el) => {
+              const text = $(el).text().trim();
+              if (text) srMap[`sr_${i}`] = text;
+            });
+
+            if (Object.keys(srMap).length === 0) {
+              fixedIssueIds.push(issue.id);
+              break;
+            }
+
+            for (const locale of targetLocales) {
+              const translated = await translateObject(
+                lingoApiKey,
+                srMap,
+                "en",
+                locale
+              );
+
+              $(srSelectors).each((i, el) => {
+                const key = `sr_${i}`;
+                if (translated[key]) {
+                  $(el).attr(`data-sr-${locale}`, translated[key]);
+                }
+              });
+            }
+
+            fixedIssueIds.push(issue.id);
+            break;
+          }
+
           default:
             break;
         }

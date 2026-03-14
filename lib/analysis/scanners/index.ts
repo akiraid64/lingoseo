@@ -222,6 +222,84 @@ export function scanHeadings(
   return issues;
 }
 
+// Scan for untranslated aria-label attributes (screen reader text)
+export function scanAriaLabels(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+  const ariaElements = $("[aria-label]").toArray();
+
+  const untranslated = ariaElements.filter((el) => {
+    const val = $(el).attr("aria-label") || "";
+    // Flag if it has text but no data-aria-* locale translations yet
+    const hasTranslations = Object.keys((el as any).attribs || {}).some((k) =>
+      k.startsWith("data-aria-")
+    );
+    return val.trim().length > 0 && !hasTranslations;
+  });
+
+  if (untranslated.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "untranslated-aria-labels",
+      severity: "warning",
+      filePath,
+      message: `${untranslated.length} element(s) have aria-label text not translated — blind users in other locales hear English screen reader output`,
+      currentValue: untranslated
+        .map((el) => `"${$(el).attr("aria-label")}"`)
+        .slice(0, 3)
+        .join(", "),
+    });
+  }
+
+  return issues;
+}
+
+// Scan for untranslated sr-only / visually-hidden text
+export function scanSrOnly(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+
+  // Common screen-reader-only class patterns
+  const srSelectors = [
+    ".sr-only",
+    ".visually-hidden",
+    ".screen-reader-only",
+    ".screen-reader-text",
+    '[class*="sr-only"]',
+    '[class*="visually-hidden"]',
+  ];
+
+  const srElements = $(srSelectors.join(", ")).toArray();
+
+  const untranslated = srElements.filter((el) => {
+    const text = $(el).text().trim();
+    const hasTranslations = Object.keys((el as any).attribs || {}).some((k) =>
+      k.startsWith("data-sr-")
+    );
+    return text.length > 0 && !hasTranslations;
+  });
+
+  if (untranslated.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "untranslated-sr-only",
+      severity: "warning",
+      filePath,
+      message: `${untranslated.length} sr-only element(s) contain untranslated text — this text exists ONLY for screen reader users and is never translated`,
+      currentValue: untranslated
+        .map((el) => `"${$(el).text().trim()}"`)
+        .slice(0, 3)
+        .join(", "),
+    });
+  }
+
+  return issues;
+}
+
 // Run all HTML scanners
 export function runAllScanners(
   filePath: string,
@@ -238,5 +316,7 @@ export function runAllScanners(
     ...scanAltText(filePath, $),
     ...scanHtmlLang(filePath, $),
     ...scanHeadings(filePath, $),
+    ...scanAriaLabels(filePath, $),
+    ...scanSrOnly(filePath, $),
   ];
 }

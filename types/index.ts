@@ -16,7 +16,9 @@ export type IssueType =
   | "missing-html-lang"
   | "missing-sitemap-locales"
   | "missing-jsonld-localization"
-  | "unoptimized-headings";
+  | "unoptimized-headings"
+  | "untranslated-aria-labels"
+  | "untranslated-sr-only";
 
 export interface SeoIssue {
   id: string;
