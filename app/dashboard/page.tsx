@@ -37,11 +37,19 @@ export default function DashboardPage() {
     setError(null);
     setAnalysis(null);
     setPrResult(null);
-    setStatusMsg("Cloning repository and scanning for SEO issues...");
+    setStatusMsg(
+      apiKey
+        ? "Cloning repo → pattern scanning → Gemini semantic analysis..."
+        : "Cloning repository and scanning for SEO issues..."
+    );
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(apiKey && { "X-Gemini-API-Key": apiKey }),
+          ...(selectedModel && { "X-Gemini-Model": selectedModel }),
+        },
         body: JSON.stringify({ repoUrl }),
       });
       const data = await res.json();
@@ -529,6 +537,59 @@ export default function DashboardPage() {
 
             {/* ── ISSUE CARDS grouped by category ── */}
             {(() => {
+              // Locale-specific cultural context: why this issue hurts for this specific market
+              const LOCALE_CONTEXT: Record<string, Record<string, string>> = {
+                "missing-hreflang": {
+                  es: "Spanish is spoken in 20+ countries — Spain, Mexico, Argentina all use different search terms. Without hreflang, Google shows Mexicans your Spain-targeted page (or vice versa), hurting click-through rates by up to 60%.",
+                  ar: "Arabic has major dialect differences between Gulf Arabic (UAE, Saudi), Egyptian Arabic, and Levantine. A Saudi user seeing an Egyptian-targeted page feels mismatched — lower trust, higher bounce rate.",
+                  zh: "Google is blocked in China — Chinese users use Baidu. Without hreflang, even your Simplified Chinese page won't reach mainland China. Traditional Chinese (zh-TW) users in Taiwan use Google but expect a different vocabulary.",
+                  pt: "Brazilian Portuguese (pt-BR) and European Portuguese (pt-PT) are mutually intelligible but feel very different. Brazilian users distrust European-style copy — it reads as formal and distant to them.",
+                  fr: "French Canadians (fr-CA) are fiercely protective of their dialect and will leave a site that addresses them in European French. Quebec has its own search behavior and social proof signals.",
+                  de: "Germany, Austria, and Switzerland use German but have different formalness expectations. Swiss German users expect 'Sie' formality; Germans are more variable. Wrong targeting erodes trust immediately.",
+                  ja: "Japanese search queries are dramatically shorter and more ambiguous than English. Keywords that work in English translate to verbose Japanese phrases nobody types. Google Japan uses different ranking signals.",
+                  ko: "Korean users predominantly use Naver, not Google. Without locale signals, your page won't be indexed correctly on Naver, which controls 70%+ of Korean search traffic.",
+                  hi: "Hindi speakers in India predominantly use Google, but mix English and Hindi in searches (Hinglish). Pages in pure Hindi often underperform versus mixed-language pages for Indian audiences.",
+                },
+                "missing-title": {
+                  es: "Spanish speakers type longer, more descriptive queries than English speakers. A title optimized for English ('Best CRM') may not match Spanish search behavior ('mejor CRM para pequeñas empresas'). Without a locale-optimized title, you're invisible.",
+                  ar: "Arabic Google searches tend to be question-based ('ما هو أفضل برنامج'). Titles that don't include Arabic question patterns or common phrases get much lower click-through rates.",
+                  zh: "Baidu (China's top search engine) gives extra weight to titles. A Chinese user won't click a result that doesn't immediately signal relevance — the title must use the exact search term they typed.",
+                  ja: "Japanese titles must balance keyword density differently — stuffing keywords looks spammy in Japanese. Titles should use natural phrasing that matches conversational Japanese search patterns.",
+                },
+                "missing-meta-description": {
+                  es: "Spanish descriptions need to match the region — Mexican users respond to direct, benefit-focused copy; Spanish users prefer formal, feature-focused descriptions. A generic description loses both audiences.",
+                  ar: "Arabic reads right-to-left. If your meta description starts with English or has mixed directionality, it renders incorrectly in Google's Arabic search results — showing garbled text in the snippet.",
+                  zh: "Chinese descriptions must be under ~78 Chinese characters (not 160 English characters) or they get cut off. Chinese characters are wider — Google's snippet length is measured in pixels, not characters.",
+                },
+                "untranslated-aria-labels": {
+                  es: "In Latin America, web accessibility litigation is rising rapidly — Brazil mandated WCAG compliance in 2023. A blind Spanish-speaking user who hears English aria-labels will immediately abandon your site and associate it with poor quality.",
+                  ar: "Arabic screen readers (JAWS, NVDA with Arabic support) expect right-to-left reading order. English aria-labels mixed into Arabic content cause screen readers to switch reading direction mid-sentence — deeply disorienting.",
+                  fr: "France has strict accessibility laws (RGAA). Blind French users expect perfect French screen reader output — English labels are considered a legal compliance failure, not just a UX issue.",
+                  de: "Germany's BFSG (Barrierefreiheitsstärkungsgesetz) requires digital accessibility for most commercial websites by 2025. Untranslated ARIA labels are a compliance risk.",
+                  ja: "Japanese screen reader users (PC-Talker is dominant) expect precise Japanese phrasing. Direct translations of English labels often sound robotic in Japanese — a native speaker would never say them that way.",
+                },
+                "untranslated-sr-only": {
+                  ar: "Screen reader text in Arabic must follow Arabic grammatical gender rules — buttons and actions have gendered forms. English sr-only text skips this entirely, making the experience feel broken to Arabic screen reader users.",
+                  es: "Spanish has gendered nouns — 'nuevo tab' vs 'nueva pestaña'. An English sr-only text like 'opens in new tab' translated literally sounds grammatically wrong. Native speakers notice immediately.",
+                },
+                "invalid-schema": {
+                  es: "Google's Spanish-language rich results (FAQ boxes, star ratings) require valid schema. Spanish-speaking users heavily rely on rich snippets to decide what to click — invalid schema removes you from these premium positions.",
+                  zh: "Baidu has its own structured data format (Baidu MIP). JSON-LD for Google does not help with Baidu rich results. If targeting Chinese users, you need both formats.",
+                  ja: "Japanese Google users have a very high reliance on rich results — product prices, reviews, and FAQ boxes dramatically increase CTR in Japan. Invalid schema means losing these high-visibility positions.",
+                },
+                "missing-og-tags": {
+                  es: "WhatsApp is the #1 social platform in Latin America. When a Spanish speaker shares your link on WhatsApp, broken OG tags show a blank preview — the link looks like spam and nobody clicks it.",
+                  ar: "WhatsApp and Telegram are dominant in Arabic-speaking countries. A link with no OG preview looks untrustworthy in Arab digital culture, where personal recommendations and visual context carry high social weight.",
+                  zh: "WeChat (not Facebook/Twitter) is how Chinese users share links. WeChat uses OG tags for link previews — without them, your shared link shows as a plain URL with no preview, which Chinese users associate with scam content.",
+                  ru: "VKontakte (VK), the dominant Russian social network, uses OG tags for link previews. Without them, shared links look broken on the platform most Russians actually use.",
+                },
+              };
+
+              const localeRegion = targetLocale.split("-")[0].toLowerCase();
+              const getLocaleContext = (issueType: string): string | null => {
+                return LOCALE_CONTEXT[issueType]?.[localeRegion] || null;
+              };
+
               const ISSUE_META: Record<string, { title: string; plain: string; category: "SEO" | "ARIA" | "TECHNICAL"; catColor: string; fixMode: string; beforeEx: string; afterEx: string }> = {
                 "missing-title": {
                   title: "No Page Title",
@@ -714,9 +775,28 @@ export default function DashboardPage() {
                                 }}>{issue.severity.toUpperCase()}</span>
                               </div>
                               {meta && (
-                                <p style={{ fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.7, margin: 0, maxWidth: "600px" }}>
-                                  {meta.plain}
-                                </p>
+                                <>
+                                  <p style={{ fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.7, margin: 0, maxWidth: "600px" }}>
+                                    {meta.plain}
+                                  </p>
+                                  {getLocaleContext(issue.type) && (
+                                    <div style={{
+                                      marginTop: "8px",
+                                      padding: "8px 12px",
+                                      background: "rgba(168,255,62,0.04)",
+                                      border: "1px solid rgba(168,255,62,0.2)",
+                                      borderLeft: "3px solid var(--accent)",
+                                      maxWidth: "600px",
+                                    }}>
+                                      <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.12em", marginBottom: "4px", fontFamily: "var(--font-mono)" }}>
+                                        WHY THIS HURTS FOR {targetLocale.toUpperCase()} USERS
+                                      </div>
+                                      <p style={{ fontSize: "10px", color: "rgba(168,255,62,0.75)", lineHeight: 1.7, margin: 0 }}>
+                                        {getLocaleContext(issue.type)}
+                                      </p>
+                                    </div>
+                                  )}
+                                </>
                               )}
                               <div style={{ fontSize: "9px", color: "var(--fg-muted)", marginTop: "6px", letterSpacing: "0.05em", opacity: 0.5 }}>
                                 {issue.filePath}

@@ -1,8 +1,10 @@
 import { readdir, readFile, stat } from "fs/promises";
 import { join, extname, relative } from "path";
 import { runAllScanners } from "./scanners";
+import { runGeminiScanner } from "./gemini-scanner";
 import { calculateSeoScore } from "@/lib/translation/seo-optimizer";
 import type { AnalysisResult, SeoIssue } from "@/types";
+import { log } from "@/lib/logger";
 
 const SCANNABLE_EXTENSIONS = new Set([
   ".html",
@@ -97,18 +99,53 @@ async function detectLocales(cloneDir: string): Promise<string[]> {
 
 export async function analyzeRepo(
   cloneDir: string,
-  repoUrl: string
+  repoUrl: string,
+  geminiApiKey?: string,
+  geminiModel?: string,
 ): Promise<AnalysisResult> {
   const files = await walkDir(cloneDir);
   const allIssues: SeoIssue[] = [];
+
+  log.step(`Scanning ${files.length} files`);
 
   for (const filePath of files) {
     try {
       const content = await readFile(filePath, "utf-8");
       const relPath = relative(cloneDir, filePath);
-      const issues = runAllScanners(relPath, content);
-      allIssues.push(...issues);
-    } catch {}
+
+      // 1. Fast pattern-based scan
+      const patternIssues = runAllScanners(relPath, content);
+      allIssues.push(...patternIssues);
+
+      if (patternIssues.length > 0) {
+        log.item(`${relPath} — ${patternIssues.length} pattern issues`);
+        patternIssues.forEach(i => log.item(`  [${i.severity.toUpperCase()}] ${i.type}: ${i.message}`));
+      } else {
+        log.item(`${relPath} — clean`);
+      }
+
+      // 2. Gemini semantic scan — catches content-level issues
+      if (geminiApiKey && geminiModel) {
+        log.info(`Gemini scanning ${relPath}...`);
+        const existingTypes = new Set(patternIssues.map(i => i.type));
+        const geminiIssues = await runGeminiScanner({
+          geminiApiKey,
+          modelName: geminiModel,
+          filePath: relPath,
+          fileContent: content,
+          existingIssueTypes: existingTypes,
+        });
+        if (geminiIssues.length > 0) {
+          log.ok(`Gemini found ${geminiIssues.length} additional issues in ${relPath}`);
+          geminiIssues.forEach(i => log.item(`  [AI][${i.severity.toUpperCase()}] ${i.type}: ${i.message}`));
+        } else {
+          log.item(`Gemini: no additional issues in ${relPath}`);
+        }
+        allIssues.push(...geminiIssues);
+      }
+    } catch (err) {
+      log.err(`Failed to scan file`, err);
+    }
   }
 
   // Check for sitemap.xml at root

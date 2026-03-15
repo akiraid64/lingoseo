@@ -23,8 +23,9 @@ async function callOwnEngine(params: {
   sourceLocale: string;
   targetLocale: string;
   context: "seo" | "aria" | "general";
+  modelName?: string;
 }): Promise<Record<string, string>> {
-  const { geminiApiKey, obj, sourceLocale, targetLocale, context } = params;
+  const { geminiApiKey, obj, sourceLocale, targetLocale, context, modelName } = params;
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
 
@@ -39,7 +40,7 @@ async function callOwnEngine(params: {
       targetLocale,
       data: obj,
       context,
-      modelName: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+      modelName: modelName || process.env.GEMINI_MODEL || "gemini-2.0-flash",
     }),
   });
 
@@ -60,7 +61,8 @@ export async function translateText(
   text: string,
   sourceLocale: string,
   targetLocale: string,
-  geminiApiKey?: string
+  geminiApiKey?: string,
+  modelName?: string
 ): Promise<string> {
   if (geminiApiKey) {
     const result = await callOwnEngine({
@@ -70,6 +72,7 @@ export async function translateText(
       sourceLocale,
       targetLocale,
       context: "general",
+      modelName,
     });
     return result.value || text;
   }
@@ -89,7 +92,8 @@ export async function batchTranslateText(
   text: string,
   sourceLocale: string,
   targetLocales: string[],
-  geminiApiKey?: string
+  geminiApiKey?: string,
+  modelName?: string
 ): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
 
@@ -100,7 +104,8 @@ export async function batchTranslateText(
         text,
         sourceLocale,
         locale,
-        geminiApiKey
+        geminiApiKey,
+        modelName
       );
     })
   );
@@ -119,7 +124,8 @@ export async function translateObject(
   sourceLocale: string,
   targetLocale: string,
   geminiApiKey?: string,
-  context: "seo" | "aria" | "general" = "general"
+  context: "seo" | "aria" | "general" = "general",
+  modelName?: string
 ): Promise<Record<string, string>> {
   if (geminiApiKey) {
     return callOwnEngine({
@@ -129,6 +135,7 @@ export async function translateObject(
       sourceLocale,
       targetLocale,
       context,
+      modelName,
     });
   }
 

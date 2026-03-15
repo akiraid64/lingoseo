@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { log } from "@/lib/logger";
 
 export const maxDuration = 60;
 
@@ -50,6 +51,8 @@ export async function POST(req: Request) {
     return Response.json({ data: {} });
   }
 
+  log.info(`Translate: ${sourceLocale} → ${targetLocale} | context: ${context} | ${stringCount} strings | model: ${modelName}`);
+
   try {
     const translated = await translateWithGemini({
       geminiApiKey,
@@ -60,9 +63,10 @@ export async function POST(req: Request) {
       context,
     });
 
+    log.ok(`Translated ${Object.keys(translated).length} strings → ${targetLocale}`);
     return Response.json({ data: translated });
   } catch (err) {
-    console.error("[translate engine] Error:", err);
+    log.err(`Translation failed (${sourceLocale}→${targetLocale})`, err);
     return Response.json(
       { error: err instanceof Error ? err.message : "Translation failed" },
       { status: 500 }

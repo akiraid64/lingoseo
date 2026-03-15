@@ -155,7 +155,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                 lingoApiKey,
                 currentTitle,
                 "en",
-                targetLocales
+                targetLocales,
+                geminiApiKey,
+                modelName
               );
 
               // Step 2: Use Gemini to optimize translations for search keywords
@@ -227,7 +229,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                 lingoApiKey,
                 descContent,
                 "en",
-                targetLocales
+                targetLocales,
+                geminiApiKey,
+                modelName
               );
 
               // Optimize each translation for SEO
@@ -325,7 +329,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                     lingoApiKey,
                     readableAlt,
                     "en",
-                    targetLocales
+                    targetLocales,
+                    geminiApiKey,
+                    modelName
                   );
                   // Store as data attributes
                   for (const [locale, text] of Object.entries(translations)) {
@@ -348,7 +354,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                   lingoApiKey,
                   h1Text,
                   "en",
-                  targetLocales
+                  targetLocales,
+                  geminiApiKey,
+                  modelName
                 );
                 // Store locale translations as data attributes
                 for (const [locale, text] of Object.entries(translations)) {
@@ -384,7 +392,8 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                 "en",
                 locale,
                 geminiApiKey,
-                "aria"
+                "aria",
+                modelName
               );
 
               $("[aria-label]").each((i, el) => {
@@ -430,7 +439,8 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                 "en",
                 locale,
                 geminiApiKey,
-                "aria"
+                "aria",
+                modelName
               );
 
               $(srSelectors).each((i, el) => {
@@ -505,7 +515,8 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
         seoMetadata,
         targetLocales,
         lingoApiKey,
-        geminiApiKey
+        geminiApiKey,
+        modelName
       );
       fixResults.push(...localeFilesResult);
     }
@@ -557,7 +568,7 @@ async function fixTsxWithGemini(params: {
     log.push(`[LINGO] Batch translating ${Object.keys(seoStrings).length} strings to ${targetLocales.length} locales`);
     for (const locale of targetLocales) {
       try {
-        translations[locale] = await translateObject(lingoApiKey, seoStrings, "en", locale);
+        translations[locale] = await translateObject(lingoApiKey, seoStrings, "en", locale, geminiApiKey, "seo", modelName);
         log.push(`[LINGO] ✓ ${locale}: ${Object.keys(translations[locale]).length} strings translated`);
       } catch (err) {
         log.push(`[LINGO] ✗ ${locale}: ${err instanceof Error ? err.message : String(err)}`);
@@ -670,7 +681,8 @@ async function generateLocaleFiles(
   seoMetadata: Record<string, string>,
   targetLocales: string[],
   lingoApiKey: string,
-  geminiApiKey?: string
+  geminiApiKey?: string,
+  modelName?: string
 ): Promise<FixResult[]> {
   const results: FixResult[] = [];
   const localesDir = join(cloneDir, "locales", "seo");
@@ -687,7 +699,8 @@ async function generateLocaleFiles(
       "en",
       locale,
       geminiApiKey,
-      "seo"
+      "seo",
+      modelName
     );
 
     const filePath = join("locales", "seo", `${locale}.json`);

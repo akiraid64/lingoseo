@@ -33,8 +33,29 @@ export async function pushBranchAndCreatePr(params: {
     fixModes.fullPage && "full",
   ].filter(Boolean).join("-");
 
-  const branchName = `lingoseo/${targetLocale}-${modeSlug}`;
+  const octokit = new Octokit({ auth: accessToken });
+  const baseBranchName = `lingoseo/${targetLocale}-${modeSlug}`;
   const defaultBranch = await getDefaultBranch(accessToken, owner, repo);
+
+  // Check if branch already exists on remote — if so, append a counter suffix
+  // so each run creates a fresh, independent PR
+  let branchName = baseBranchName;
+  let counter = 2;
+  while (true) {
+    try {
+      await octokit.rest.git.getRef({
+        owner,
+        repo,
+        ref: `heads/${branchName}`,
+      });
+      // Branch exists — try next suffix
+      branchName = `${baseBranchName}-${counter}`;
+      counter++;
+    } catch {
+      // Branch doesn't exist — safe to use this name
+      break;
+    }
+  }
 
   const modeLabel = [
     fixModes.seo && "SEO metadata",
@@ -50,16 +71,16 @@ export async function pushBranchAndCreatePr(params: {
   );
   await git.push("origin", branchName, ["--set-upstream"]);
 
-  // Create PR
-  const octokit = new Octokit({ auth: accessToken });
+  // Create PR — branch is always unique so this always creates a new PR
   const body = generatePrBody(analysis, fixes, targetLocale, fixModes);
+  const prTitle = `fix(seo): ${targetLocale} — ${modeLabel} [LingoSEO]`;
 
   const { data: pr } = await octokit.rest.pulls.create({
     owner,
     repo,
     head: branchName,
     base: defaultBranch,
-    title: `fix(seo): ${targetLocale} — ${modeLabel} [LingoSEO]`,
+    title: prTitle,
     body,
   });
 
