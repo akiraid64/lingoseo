@@ -61,6 +61,7 @@ export interface FixResult {
   originalContent: string;
   newContent: string;
   issuesFixed: string[];
+  log?: string[];
 }
 
 export interface PrResult {

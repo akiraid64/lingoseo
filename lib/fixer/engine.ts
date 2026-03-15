@@ -13,6 +13,7 @@ import {
   generateHreflangTags,
   generateSitemapWithLocales,
   calculateSeoScore,
+  callGemini,
 } from "@/lib/translation/seo-optimizer";
 
 interface FixModes {
@@ -69,28 +70,65 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
   }
 
   const fixResults: FixResult[] = [];
+  const globalLog: string[] = [];
+
+  globalLog.push(`[FIXER] Starting — ${filteredIssues.length} issues across ${issuesByFile.size} files`);
+  globalLog.push(`[FIXER] Modes: SEO=${fixModes.seo} ARIA=${fixModes.aria} FULLPAGE=${fixModes.fullPage}`);
+  globalLog.push(`[FIXER] Target locales: ${targetLocales.join(", ") || "none"}`);
 
   for (const [filePath, fileIssues] of issuesByFile) {
-    // Skip virtual files like sitemap.xml that don't exist yet
     const fullPath = join(cloneDir, filePath);
+    const isTsx = /\.(tsx|jsx|ts|js)$/.test(filePath);
 
     let content: string;
     try {
       content = await readFile(fullPath, "utf-8");
+      globalLog.push(`[READ] ${filePath} (${content.length} chars, ${isTsx ? "TSX/JSX → Gemini" : "HTML → Cheerio"})`);
     } catch {
-      // Handle sitemap.xml creation separately
       if (filePath === "sitemap.xml" && targetLocales.length > 0) {
-        const sitemapResult = await createSitemap(
-          cloneDir,
-          targetLocales,
-          geminiApiKey,
-          modelName
-        );
-        if (sitemapResult) fixResults.push(sitemapResult);
+        globalLog.push(`[SITEMAP] Creating sitemap.xml with ${targetLocales.length} locales`);
+        const sitemapResult = await createSitemap(cloneDir, targetLocales, geminiApiKey, modelName);
+        if (sitemapResult) {
+          sitemapResult.log = [`[SITEMAP] Created with locales: ${targetLocales.join(", ")}`];
+          fixResults.push(sitemapResult);
+          globalLog.push(`[SITEMAP] ✓ Created`);
+        }
+      } else {
+        globalLog.push(`[SKIP] ${filePath} — file not found`);
       }
       continue;
     }
 
+    // ── TSX/JSX: Gemini understands React/Next.js patterns ──
+    if (isTsx) {
+      globalLog.push(`[GEMINI] Analyzing ${filePath} with ${fileIssues.length} issues...`);
+      try {
+        const result = await fixTsxWithGemini({
+          filePath, content, issues: fileIssues,
+          geminiApiKey, modelName, targetLocales,
+          lingoApiKey, fixModes,
+        });
+        if (result.newContent !== content) {
+          await writeFile(fullPath, result.newContent, "utf-8");
+          fixResults.push({
+            filePath,
+            originalContent: content,
+            newContent: result.newContent,
+            issuesFixed: result.fixedIssueIds,
+            log: result.log,
+          });
+          globalLog.push(`[GEMINI] ✓ ${filePath} — fixed ${result.fixedIssueIds.length} issues`);
+        } else {
+          globalLog.push(`[GEMINI] ⚠ ${filePath} — Gemini returned unchanged content`);
+        }
+      } catch (err) {
+        globalLog.push(`[GEMINI] ✗ ${filePath} — ${err instanceof Error ? err.message : String(err)}`);
+        console.error(`[FIXER] Gemini failed for ${filePath}:`, err);
+      }
+      continue;
+    }
+
+    // ── HTML: Cheerio path ──
     const originalContent = content;
     const $ = cheerio.load(content);
     const fixedIssueIds: string[] = [];
@@ -408,20 +446,25 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
             break;
         }
       } catch (err) {
-        console.error(`Failed to fix ${issue.type} in ${filePath}:`, err);
+        const msg = err instanceof Error ? err.message : String(err);
+        globalLog.push(`[CHEERIO] ✗ ${issue.type} in ${filePath}: ${msg}`);
+        console.error(`[FIXER] Failed to fix ${issue.type} in ${filePath}:`, err);
       }
     }
 
     if (fixedIssueIds.length > 0) {
       const newContent = $.html();
       await writeFile(fullPath, newContent, "utf-8");
-
+      globalLog.push(`[CHEERIO] ✓ ${filePath} — fixed: ${fixedIssueIds.join(", ")}`);
       fixResults.push({
         filePath,
         originalContent,
         newContent,
         issuesFixed: fixedIssueIds,
+        log: fixedIssueIds.map(id => `Fixed ${id}`),
       });
+    } else {
+      globalLog.push(`[CHEERIO] ⚠ ${filePath} — no fixes applied (${fileIssues.length} issues found but no HTML elements matched)`);
     }
   }
 
@@ -464,7 +507,132 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
     }
   }
 
+  globalLog.push(`[FIXER] Done — ${fixResults.length} files modified`);
+
+  // Attach global log to first result so it surfaces in the PR
+  if (fixResults.length > 0) {
+    fixResults[0].log = [...globalLog, ...(fixResults[0].log || [])];
+  } else {
+    // No fixes — return a dummy entry so the log is accessible
+    fixResults.push({
+      filePath: "__fixer_log__",
+      originalContent: "",
+      newContent: "",
+      issuesFixed: [],
+      log: globalLog,
+    });
+  }
+
   return fixResults;
+}
+
+// ── Gemini-powered TSX/JSX fixer ──────────────────────────────────────────
+
+async function fixTsxWithGemini(params: {
+  filePath: string;
+  content: string;
+  issues: SeoIssue[];
+  geminiApiKey: string;
+  modelName: string;
+  targetLocales: string[];
+  lingoApiKey: string;
+  fixModes: FixModes;
+}): Promise<{ newContent: string; fixedIssueIds: string[]; log: string[] }> {
+  const { filePath, content, issues, geminiApiKey, modelName, targetLocales, fixModes, lingoApiKey } = params;
+  const log: string[] = [];
+
+  // Collect SEO strings for lingo.dev translation first
+  const seoStrings: Record<string, string> = {};
+  issues.forEach((issue, i) => {
+    if (issue.currentValue) seoStrings[`issue_${i}`] = issue.currentValue;
+  });
+
+  // Batch translate with lingo.dev if we have strings and locales
+  let translations: Record<string, Record<string, string>> = {};
+  if (lingoApiKey && targetLocales.length > 0 && Object.keys(seoStrings).length > 0) {
+    log.push(`[LINGO] Batch translating ${Object.keys(seoStrings).length} strings to ${targetLocales.length} locales`);
+    for (const locale of targetLocales) {
+      try {
+        translations[locale] = await translateObject(lingoApiKey, seoStrings, "en", locale);
+        log.push(`[LINGO] ✓ ${locale}: ${Object.keys(translations[locale]).length} strings translated`);
+      } catch (err) {
+        log.push(`[LINGO] ✗ ${locale}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  const issueList = issues
+    .map(i => `- [${i.severity.toUpperCase()}] ${i.type}: ${i.message}${i.currentValue ? ` (current: "${i.currentValue}")` : ""}`)
+    .join("\n");
+
+  const localeBlock = targetLocales.length > 0
+    ? `\nTARGET LOCALES: ${targetLocales.join(", ")} — add translated versions as described below.`
+    : "";
+
+  const seoInstructions = fixModes.seo ? `
+SEO FIXES (this is a Next.js App Router project):
+- Add or update: export const metadata: Metadata = { title: "...", description: "...", openGraph: { title, description, images }, twitter: { card: "summary_large_image" }, alternates: { canonical: "/", languages: { ${targetLocales.map(l => `"${l}": "/${l}"`).join(", ")} } } }
+- Add if missing: export const viewport: Viewport = { width: "device-width", initialScale: 1 }
+- Import Metadata and Viewport from "next"
+- Title: 50-60 chars, include primary keyword. Description: 150-160 chars, compelling.
+- For hreflang: use metadata.alternates.languages with ISO 639-1 codes` : "";
+
+  const ariaInstructions = fixModes.aria ? `
+ARIA FIXES:
+- Find all aria-label="..." in JSX
+- Add data-aria-{locale}="translated" attributes for each target locale
+- Find className="sr-only" elements, add data-sr-{locale}="translated"
+- Use lingo.dev translated values if available` : "";
+
+  const fullPageInstructions = fixModes.fullPage ? `
+FULL PAGE:
+- Wrap visible text strings in translation-ready format
+- Add data-locale attributes to mark translatable sections` : "";
+
+  const prompt = `You are an expert Next.js developer. Fix SEO and accessibility issues in this file.
+
+FILE: ${filePath}
+ISSUES TO FIX:
+${issueList}
+${localeBlock}
+${seoInstructions}
+${ariaInstructions}
+${fullPageInstructions}
+
+CURRENT FILE CONTENT:
+${content.slice(0, 10000)}
+
+RULES:
+- Return ONLY the complete modified TypeScript/TSX file content
+- Do NOT wrap in markdown code blocks
+- Do NOT change visual styles, layout, or component logic
+- Only ADD metadata exports, viewport exports, and aria/data attributes
+- Preserve all existing imports and code exactly
+
+FIXED FILE:`;
+
+  log.push(`[GEMINI] Sending ${filePath} to ${modelName} (${issues.length} issues, ${content.length} chars)`);
+
+  const fixed = await callGemini(geminiApiKey, modelName, prompt);
+
+  if (!fixed || fixed.length < 50) {
+    log.push(`[GEMINI] ✗ Empty or too-short response (${fixed?.length ?? 0} chars)`);
+    throw new Error("Gemini returned empty response");
+  }
+
+  // Strip markdown fences if Gemini added them anyway
+  const cleaned = fixed
+    .replace(/^```(?:tsx?|jsx?|typescript)?\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .trim();
+
+  log.push(`[GEMINI] ✓ Response: ${cleaned.length} chars`);
+
+  return {
+    newContent: cleaned,
+    fixedIssueIds: issues.map(i => i.id),
+    log,
+  };
 }
 
 /**

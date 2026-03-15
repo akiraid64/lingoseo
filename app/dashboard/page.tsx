@@ -29,6 +29,7 @@ export default function DashboardPage() {
   const [prResult, setPrResult] = useState<PrResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
+  const [fixLog, setFixLog] = useState<string[]>([]);
 
   async function handleAnalyze() {
     if (!repoUrl) return;
@@ -60,6 +61,7 @@ export default function DashboardPage() {
     setFixing(true);
     setError(null);
     setPrResult(null);
+    setFixLog([]);
     setStatusMsg(
       "Translating with lingo.dev SDK → optimizing keywords with Gemini → pushing to GitHub..."
     );
@@ -83,6 +85,7 @@ export default function DashboardPage() {
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
+      if (data.fixLog) setFixLog(data.fixLog);
       if (data.pr) {
         setPrResult(data.pr);
         setStatusMsg("");
@@ -813,6 +816,30 @@ export default function DashboardPage() {
           </>
         )}
 
+        {/* FIX LOG */}
+        {fixLog.length > 0 && (
+          <div style={{ marginBottom: "32px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "16px", padding: "16px 0", borderTop: "1px solid var(--border)" }}>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "13px", color: "var(--fg-muted)", letterSpacing: "0.1em" }}>LOG</span>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "22px", letterSpacing: "0.05em" }}>FIX ENGINE OUTPUT</span>
+            </div>
+            <div style={{ border: "1px solid var(--border)", background: "#050505", padding: "16px", maxHeight: "320px", overflowY: "auto" }}>
+              {fixLog.map((line, i) => {
+                const color = line.includes("✓") ? "var(--accent)"
+                  : line.includes("✗") ? "#f87171"
+                  : line.includes("⚠") ? "#facc15"
+                  : line.startsWith("[GEMINI]") ? "#c084fc"
+                  : line.startsWith("[LINGO]") ? "#60a5fa"
+                  : "var(--fg-muted)";
+                return (
+                  <div key={i} style={{ fontSize: "10px", fontFamily: "var(--font-mono)", color, lineHeight: 1.8, letterSpacing: "0.03em" }}>
+                    {line}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       <style>{`

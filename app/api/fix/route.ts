@@ -78,12 +78,15 @@ export async function POST(req: Request) {
       analysis,
     });
 
+    const fixLog = fixes.flatMap(f => f.log || []);
+
     return Response.json({
       analysis,
       fixes: fixes.map((f) => ({
         filePath: f.filePath,
         issuesFixed: f.issuesFixed.length,
       })),
+      fixLog,
       pr: prResult,
     });
   } catch (err) {

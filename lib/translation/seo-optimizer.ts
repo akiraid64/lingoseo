@@ -23,6 +23,16 @@ LOCALE-SPECIFIC KEYWORD STRATEGY:
 // Deprecated schema types Google no longer supports for rich results
 const DEPRECATED_SCHEMA = ["HowTo", "FAQPage", "SpecialAnnouncement", "CourseInfo", "ClaimReview"];
 
+export async function callGemini(
+  geminiApiKey: string,
+  modelName: string,
+  prompt: string
+): Promise<string> {
+  const ai = new GoogleGenAI({ apiKey: geminiApiKey });
+  const response = await ai.models.generateContent({ model: modelName, contents: prompt });
+  return response.text?.trim() || "";
+}
+
 export async function optimizeSeoContent(params: {
   geminiApiKey: string;
   modelName: string;
