@@ -15,6 +15,12 @@ import {
   calculateSeoScore,
 } from "@/lib/translation/seo-optimizer";
 
+interface FixModes {
+  seo: boolean;
+  aria: boolean;
+  fullPage: boolean;
+}
+
 interface FixerParams {
   cloneDir: string;
   issues: SeoIssue[];
@@ -22,6 +28,7 @@ interface FixerParams {
   modelName: string;
   targetLocales: string[];
   lingoApiKey: string;
+  fixModes: FixModes;
 }
 
 export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
@@ -32,11 +39,30 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
     modelName,
     targetLocales,
     lingoApiKey,
+    fixModes,
   } = params;
+
+  const SEO_ISSUE_TYPES = new Set([
+    "missing-title", "title-too-short", "title-too-long",
+    "missing-meta-description", "meta-description-too-long",
+    "missing-hreflang", "missing-og-tags", "missing-twitter-tags",
+    "missing-canonical", "missing-viewport", "missing-html-lang",
+    "unoptimized-headings", "missing-schema", "invalid-schema",
+  ]);
+
+  const ARIA_ISSUE_TYPES = new Set([
+    "untranslated-aria-labels", "untranslated-sr-only",
+  ]);
+
+  const filteredIssues = issues.filter((issue) => {
+    if (SEO_ISSUE_TYPES.has(issue.type)) return fixModes.seo;
+    if (ARIA_ISSUE_TYPES.has(issue.type)) return fixModes.aria;
+    return true;
+  });
 
   // Group issues by file
   const issuesByFile = new Map<string, SeoIssue[]>();
-  for (const issue of issues) {
+  for (const issue of filteredIssues) {
     const existing = issuesByFile.get(issue.filePath) || [];
     existing.push(issue);
     issuesByFile.set(issue.filePath, existing);
@@ -396,6 +422,31 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
         newContent,
         issuesFixed: fixedIssueIds,
       });
+    }
+  }
+
+  // Full page translation using lingo.dev localizeHtml
+  if (fixModes.fullPage && lingoApiKey && targetLocales.length > 0) {
+    for (const [filePath] of issuesByFile) {
+      const fullPath = join(cloneDir, filePath);
+      try {
+        const html = await readFile(fullPath, "utf-8");
+        for (const locale of targetLocales) {
+          const translated = await translateHtml(lingoApiKey, html, "en", locale);
+          const localePath = filePath.replace(/(\.[^.]+)$/, `.${locale}$1`);
+          const localeFullPath = join(cloneDir, localePath);
+          await mkdir(dirname(localeFullPath), { recursive: true });
+          await writeFile(localeFullPath, translated, "utf-8");
+          fixResults.push({
+            filePath: localePath,
+            originalContent: "",
+            newContent: translated,
+            issuesFixed: [`full-page-${locale}`],
+          });
+        }
+      } catch {
+        // skip files that can't be read
+      }
     }
   }
 

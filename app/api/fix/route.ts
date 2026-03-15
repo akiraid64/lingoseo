@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
   const lingoApiKey = req.headers.get("x-lingo-api-key") || process.env.LINGO_API_KEY || "";
 
-  const { repoUrl, modelName, targetLocales } = await req.json();
+  const { repoUrl, modelName, targetLocales, fixModes } = await req.json();
   if (!repoUrl || !modelName) {
     return Response.json(
       { error: "Missing repoUrl or modelName" },
@@ -57,6 +57,7 @@ export async function POST(req: Request) {
       modelName,
       targetLocales: targetLocales || analysis.localesDetected || [],
       lingoApiKey,
+      fixModes: fixModes || { seo: true, aria: true, fullPage: false },
     });
 
     if (fixes.length === 0) {
