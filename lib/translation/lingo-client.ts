@@ -10,15 +10,71 @@ export function getLingoEngine(apiKey: string): LingoDotDevEngine {
 }
 
 /**
- * Translate a single text string using lingo.dev SDK
+ * Call our custom Gemini-powered translation engine at /api/translate.
+ * This gives us SEO-aware, ARIA-aware, culturally accurate translations
+ * without needing to configure each locale manually in lingo.dev dashboard.
+ *
+ * Falls back to lingo.dev SDK if geminiApiKey is not provided.
+ */
+async function callOwnEngine(params: {
+  lingoApiKey: string;
+  geminiApiKey: string;
+  obj: Record<string, string>;
+  sourceLocale: string;
+  targetLocale: string;
+  context: "seo" | "aria" | "general";
+}): Promise<Record<string, string>> {
+  const { geminiApiKey, obj, sourceLocale, targetLocale, context } = params;
+
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+
+  const res = await fetch(`${baseUrl}/api/translate`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-gemini-api-key": geminiApiKey,
+    },
+    body: JSON.stringify({
+      sourceLocale,
+      targetLocale,
+      data: obj,
+      context,
+      modelName: process.env.GEMINI_MODEL || "gemini-1.5-flash",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Engine returned ${res.status}: ${await res.text()}`);
+  }
+
+  const json = await res.json();
+  return json.data || obj;
+}
+
+/**
+ * Translate a single text string.
+ * Uses our Gemini engine if geminiApiKey provided, else lingo.dev SDK.
  */
 export async function translateText(
-  apiKey: string,
+  lingoApiKey: string,
   text: string,
   sourceLocale: string,
-  targetLocale: string
+  targetLocale: string,
+  geminiApiKey?: string
 ): Promise<string> {
-  const engine = getLingoEngine(apiKey);
+  if (geminiApiKey) {
+    const result = await callOwnEngine({
+      lingoApiKey,
+      geminiApiKey,
+      obj: { value: text },
+      sourceLocale,
+      targetLocale,
+      context: "general",
+    });
+    return result.value || text;
+  }
+
+  const engine = getLingoEngine(lingoApiKey);
   return engine.localizeText(text, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,
@@ -26,46 +82,57 @@ export async function translateText(
 }
 
 /**
- * Translate a text to multiple locales at once using lingo.dev SDK
+ * Translate one string to multiple locales at once.
  */
 export async function batchTranslateText(
-  apiKey: string,
+  lingoApiKey: string,
   text: string,
   sourceLocale: string,
-  targetLocales: string[]
+  targetLocales: string[],
+  geminiApiKey?: string
 ): Promise<Record<string, string>> {
-  const engine = getLingoEngine(apiKey);
   const results: Record<string, string> = {};
 
-  const translations = await Promise.all(
+  await Promise.all(
     targetLocales.map(async (locale) => {
-      const translated = await engine.localizeText(text, {
-        sourceLocale: sourceLocale as any,
-        targetLocale: locale as any,
-      });
-      return { locale, translated };
+      results[locale] = await translateText(
+        lingoApiKey,
+        text,
+        sourceLocale,
+        locale,
+        geminiApiKey
+      );
     })
   );
-
-  for (const { locale, translated } of translations) {
-    results[locale] = translated;
-  }
 
   return results;
 }
 
 /**
- * Translate an object (preserving structure) using lingo.dev SDK
- * Perfect for translating SEO metadata objects like:
- * { title: "...", description: "...", heading: "..." }
+ * Translate an object of strings — SEO metadata, ARIA labels, etc.
+ * Uses our Gemini engine (SEO/ARIA aware + culturally intelligent).
+ * Falls back to lingo.dev SDK if no Gemini key.
  */
 export async function translateObject(
-  apiKey: string,
+  lingoApiKey: string,
   obj: Record<string, string>,
   sourceLocale: string,
-  targetLocale: string
+  targetLocale: string,
+  geminiApiKey?: string,
+  context: "seo" | "aria" | "general" = "general"
 ): Promise<Record<string, string>> {
-  const engine = getLingoEngine(apiKey);
+  if (geminiApiKey) {
+    return callOwnEngine({
+      lingoApiKey,
+      geminiApiKey,
+      obj,
+      sourceLocale,
+      targetLocale,
+      context,
+    });
+  }
+
+  const engine = getLingoEngine(lingoApiKey);
   return engine.localizeObject(obj, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,
@@ -73,15 +140,16 @@ export async function translateObject(
 }
 
 /**
- * Translate HTML content while preserving markup using lingo.dev SDK
+ * Translate full HTML while preserving all markup.
+ * Always uses lingo.dev SDK — localizeHtml is its strongest feature.
  */
 export async function translateHtml(
-  apiKey: string,
+  lingoApiKey: string,
   html: string,
   sourceLocale: string,
   targetLocale: string
 ): Promise<string> {
-  const engine = getLingoEngine(apiKey);
+  const engine = getLingoEngine(lingoApiKey);
   return engine.localizeHtml(html, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,

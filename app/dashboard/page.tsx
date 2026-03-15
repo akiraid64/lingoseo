@@ -21,7 +21,7 @@ export default function DashboardPage() {
     useGeminiModels(apiKey);
 
   const [repoUrl, setRepoUrl] = useState("");
-  const [targetLocales, setTargetLocales] = useState("es,fr,de,ja");
+  const [targetLocale, setTargetLocale] = useState("es");
   const [fixModes, setFixModes] = useState({ seo: true, aria: true, fullPage: false });
   const [analyzing, setAnalyzing] = useState(false);
   const [fixing, setFixing] = useState(false);
@@ -76,10 +76,7 @@ export default function DashboardPage() {
         body: JSON.stringify({
           repoUrl,
           modelName: selectedModel,
-          targetLocales: targetLocales
-            .split(",")
-            .map((l) => l.trim())
-            .filter(Boolean),
+          targetLocale,
           fixModes,
         }),
       });
@@ -275,16 +272,44 @@ export default function DashboardPage() {
             />
           </div>
           <div style={{ marginBottom: "20px" }}>
-            <label style={labelStyle}>TARGET LOCALES (COMMA-SEPARATED)</label>
-            <input
-              type="text"
-              value={targetLocales}
-              onChange={(e) => setTargetLocales(e.target.value)}
-              placeholder="es,fr,de,ja,zh-Hans"
-              style={inputStyle}
-            />
+            <label style={labelStyle}>TARGET LOCALE — ONE LANGUAGE PER PR</label>
+            <select
+              value={targetLocale}
+              onChange={(e) => setTargetLocale(e.target.value)}
+              style={{ ...inputStyle, cursor: "pointer" }}
+            >
+              {[
+                { code: "ar",      label: "🇸🇦  Arabic (ar)" },
+                { code: "ar-SA",   label: "🇸🇦  Arabic — Saudi (ar-SA)" },
+                { code: "ar-EG",   label: "🇪🇬  Arabic — Egyptian (ar-EG)" },
+                { code: "zh-Hans", label: "🇨🇳  Chinese Simplified (zh-Hans)" },
+                { code: "zh-Hant", label: "🇹🇼  Chinese Traditional (zh-Hant)" },
+                { code: "nl",      label: "🇳🇱  Dutch (nl)" },
+                { code: "fr",      label: "🇫🇷  French (fr)" },
+                { code: "fr-CA",   label: "🇨🇦  French — Canadian (fr-CA)" },
+                { code: "de",      label: "🇩🇪  German (de)" },
+                { code: "hi",      label: "🇮🇳  Hindi (hi)" },
+                { code: "id",      label: "🇮🇩  Indonesian (id)" },
+                { code: "it",      label: "🇮🇹  Italian (it)" },
+                { code: "ja",      label: "🇯🇵  Japanese (ja)" },
+                { code: "ko",      label: "🇰🇷  Korean (ko)" },
+                { code: "pl",      label: "🇵🇱  Polish (pl)" },
+                { code: "pt-BR",   label: "🇧🇷  Portuguese — Brazil (pt-BR)" },
+                { code: "pt-PT",   label: "🇵🇹  Portuguese — Portugal (pt-PT)" },
+                { code: "ru",      label: "🇷🇺  Russian (ru)" },
+                { code: "es",      label: "🇪🇸  Spanish (es)" },
+                { code: "es-MX",   label: "🇲🇽  Spanish — Mexico (es-MX)" },
+                { code: "es-AR",   label: "🇦🇷  Spanish — Argentina (es-AR)" },
+                { code: "sv",      label: "🇸🇪  Swedish (sv)" },
+                { code: "tr",      label: "🇹🇷  Turkish (tr)" },
+                { code: "uk",      label: "🇺🇦  Ukrainian (uk)" },
+                { code: "vi",      label: "🇻🇳  Vietnamese (vi)" },
+              ].map(({ code, label }) => (
+                <option key={code} value={code}>{label}</option>
+              ))}
+            </select>
             <p style={{ fontSize: "10px", color: "var(--fg-muted)", marginTop: "6px", letterSpacing: "0.05em" }}>
-              lingo.dev will translate SEO content to these locales using its Localization Engine
+              Each locale gets its own PR — culturally accurate, market-specific SEO keywords via Gemini
             </p>
           </div>
           {/* Fix mode toggles */}

@@ -378,12 +378,13 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
             }
 
             for (const locale of targetLocales) {
-              // One translateObject call translates ALL aria strings at once
               const translated = await translateObject(
                 lingoApiKey,
                 ariaMap,
                 "en",
-                locale
+                locale,
+                geminiApiKey,
+                "aria"
               );
 
               $("[aria-label]").each((i, el) => {
@@ -427,7 +428,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
                 lingoApiKey,
                 srMap,
                 "en",
-                locale
+                locale,
+                geminiApiKey,
+                "aria"
               );
 
               $(srSelectors).each((i, el) => {
@@ -501,7 +504,8 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
         cloneDir,
         seoMetadata,
         targetLocales,
-        lingoApiKey
+        lingoApiKey,
+        geminiApiKey
       );
       fixResults.push(...localeFilesResult);
     }
@@ -665,7 +669,8 @@ async function generateLocaleFiles(
   cloneDir: string,
   seoMetadata: Record<string, string>,
   targetLocales: string[],
-  lingoApiKey: string
+  lingoApiKey: string,
+  geminiApiKey?: string
 ): Promise<FixResult[]> {
   const results: FixResult[] = [];
   const localesDir = join(cloneDir, "locales", "seo");
@@ -680,7 +685,9 @@ async function generateLocaleFiles(
       lingoApiKey,
       seoMetadata,
       "en",
-      locale
+      locale,
+      geminiApiKey,
+      "seo"
     );
 
     const filePath = join("locales", "seo", `${locale}.json`);
