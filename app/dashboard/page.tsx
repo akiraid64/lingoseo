@@ -9,16 +9,13 @@ import type { AnalysisResult, PrResult } from "@/types";
 export default function DashboardPage() {
   const { data: session } = useSession();
   const {
-    apiKey,
-    setApiKey,
-    lingoApiKey,
     selectedModel,
     setSelectedModel,
     clearAll,
     isLoaded,
   } = useApiKey();
   const { models, loading: modelsLoading, error: modelsError } =
-    useGeminiModels(apiKey);
+    useGeminiModels();
 
   const [repoUrl, setRepoUrl] = useState("");
   const [targetLocale, setTargetLocale] = useState("es");
@@ -37,19 +34,11 @@ export default function DashboardPage() {
     setError(null);
     setAnalysis(null);
     setPrResult(null);
-    setStatusMsg(
-      apiKey
-        ? "Cloning repo → pattern scanning → Gemini semantic analysis..."
-        : "Cloning repository and scanning for SEO issues..."
-    );
+    setStatusMsg("Cloning repo → pattern scanning → Gemini semantic analysis...");
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(apiKey && { "X-Gemini-API-Key": apiKey }),
-          ...(selectedModel && { "X-Gemini-Model": selectedModel }),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repoUrl }),
       });
       const data = await res.json();
@@ -65,7 +54,7 @@ export default function DashboardPage() {
   }
 
   async function handleFixAndPr() {
-    if (!analysis || !selectedModel || !apiKey) return;
+    if (!analysis || !selectedModel) return;
     setFixing(true);
     setError(null);
     setPrResult(null);
@@ -76,11 +65,7 @@ export default function DashboardPage() {
     try {
       const res = await fetch("/api/fix", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Gemini-API-Key": apiKey,
-          "X-Lingo-API-Key": lingoApiKey,
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           repoUrl,
           modelName: selectedModel,
@@ -107,7 +92,7 @@ export default function DashboardPage() {
 
   if (!isLoaded) return null;
 
-  const canFix = selectedModel && apiKey && analysis;
+  const canFix = selectedModel && analysis;
 
   const gradeColor = (grade: string) => {
     if (grade === "A") return "var(--accent)";
@@ -188,7 +173,7 @@ export default function DashboardPage() {
           </p>
         </div>
 
-        {/* STEP 01 — API KEYS */}
+        {/* STEP 01 — MODEL */}
         <div style={{ marginBottom: "2px" }}>
           <div style={{
             display: "flex",
@@ -198,60 +183,32 @@ export default function DashboardPage() {
             borderTop: "1px solid var(--border)",
           }}>
             <span style={{ fontFamily: "var(--font-display)", fontSize: "13px", color: "var(--fg-muted)", letterSpacing: "0.1em" }}>01</span>
-            <span style={{ fontFamily: "var(--font-display)", fontSize: "22px", letterSpacing: "0.05em" }}>API KEYS</span>
+            <span style={{ fontFamily: "var(--font-display)", fontSize: "22px", letterSpacing: "0.05em" }}>ENGINE</span>
           </div>
         </div>
         <div style={{ border: "1px solid var(--border)", padding: "24px", marginBottom: "32px" }}>
-          <p style={{ fontSize: "11px", color: "var(--fg-muted)", marginBottom: "20px", letterSpacing: "0.05em" }}>
-            KEYS STAY IN YOUR BROWSER (LOCALSTORAGE) — NEVER SENT TO OUR SERVER
-          </p>
-
-          {/* Gemini key + model */}
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", marginBottom: "16px" }}>
-            <div>
-              <label style={labelStyle}>GEMINI API KEY</label>
-              <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="AIza..."
-                style={inputStyle}
-              />
-            </div>
-            <div>
-              <label style={labelStyle}>GEMINI MODEL</label>
-              {modelsLoading ? (
-                <div style={{ ...inputStyle, color: "var(--fg-muted)" }}>LOADING MODELS...</div>
-              ) : modelsError ? (
-                <div style={{ ...inputStyle, border: "1px solid #f87171", color: "#f87171" }}>{modelsError}</div>
-              ) : (
-                <select
-                  value={selectedModel}
-                  onChange={(e) => setSelectedModel(e.target.value)}
-                  style={{ ...inputStyle, cursor: "pointer" }}
-                >
-                  <option value="">SELECT MODEL...</option>
-                  {models.map((m) => (
-                    <option key={m.name} value={m.name}>{m.displayName}</option>
-                  ))}
-                </select>
-              )}
-            </div>
+          <div style={{ marginBottom: "16px" }}>
+            <label style={labelStyle}>GEMINI MODEL</label>
+            {modelsLoading ? (
+              <div style={{ ...inputStyle, color: "var(--fg-muted)" }}>LOADING MODELS...</div>
+            ) : modelsError ? (
+              <div style={{ ...inputStyle, border: "1px solid #f87171", color: "#f87171" }}>{modelsError}</div>
+            ) : (
+              <select
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                style={{ ...inputStyle, cursor: "pointer" }}
+              >
+                <option value="">SELECT MODEL...</option>
+                {models.map((m) => (
+                  <option key={m.name} value={m.name}>{m.displayName}</option>
+                ))}
+              </select>
+            )}
           </div>
 
-          {(apiKey || lingoApiKey) && (
-            <button
-              onClick={clearAll}
-              style={{ background: "none", border: "none", color: "var(--fg-muted)", fontSize: "10px", cursor: "pointer", letterSpacing: "0.08em", fontFamily: "var(--font-mono)" }}
-              onMouseEnter={e => (e.currentTarget.style.color = "#f87171")}
-              onMouseLeave={e => (e.currentTarget.style.color = "var(--fg-muted)")}
-            >
-              [ CLEAR ALL KEYS ]
-            </button>
-          )}
-
-          <div style={{ marginTop: "16px", padding: "12px", background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.7 }}>
-            <strong style={{ color: "var(--fg)" }}>HOW IT WORKS:</strong> lingo.dev SDK translates your SEO content (titles, descriptions, headings, alt text, aria-labels) to all target locales. Then Gemini checks if translated keywords match what people actually search for in each locale and optimizes them.
+          <div style={{ padding: "12px", background: "rgba(255,255,255,0.03)", border: "1px solid var(--border)", fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.7 }}>
+            <strong style={{ color: "var(--fg)" }}>HOW IT WORKS:</strong> lingo.dev SDK translates your content in-place. Gemini ensures translated keywords match what people actually search for in each locale. All API keys are server-side — nothing stored in your browser.
           </div>
         </div>
 
@@ -353,10 +310,9 @@ export default function DashboardPage() {
                     onClick={() => setFixModes((p) => {
                       const next = { ...p, [key]: !p[key] };
                       if (key === "fullPage" && next.fullPage) {
-                        // Full Page covers ARIA (localizeHtml translates aria-labels)
-                        // and requires SEO (hreflang/canonical/og tags still need inserting)
-                        next.aria = false;
+                        // Full Page enables all three — SEO + ARIA + content
                         next.seo = true;
+                        next.aria = true;
                       }
                       return next;
                     })}
@@ -380,7 +336,7 @@ export default function DashboardPage() {
                       {sub}
                     </div>
                     <div style={{ fontSize: "9px", opacity: 0.55, lineHeight: 1.4 }}>
-                      {key === "aria" && fixModes.fullPage ? "INCLUDED IN FULL PAGE" : key === "seo" && fixModes.fullPage ? "AUTO-ENABLED BY FULL PAGE" : desc}
+                      {(key === "aria" || key === "seo") && fixModes.fullPage ? "AUTO-ENABLED BY FULL PAGE" : desc}
                     </div>
                   </button>
                 );
@@ -535,9 +491,9 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── ISSUE CARDS grouped by category ── */}
+            {/* ── ISSUE CARDS — filtered by selected mode ── */}
             {(() => {
-              // Locale-specific cultural context: why this issue hurts for this specific market
+              // Locale-specific cultural context
               const LOCALE_CONTEXT: Record<string, Record<string, string>> = {
                 "missing-hreflang": {
                   es: "Spanish is spoken in 20+ countries — Spain, Mexico, Argentina all use different search terms. Without hreflang, Google shows Mexicans your Spain-targeted page (or vice versa), hurting click-through rates by up to 60%.",
@@ -552,36 +508,36 @@ export default function DashboardPage() {
                 },
                 "missing-title": {
                   es: "Spanish speakers type longer, more descriptive queries than English speakers. A title optimized for English ('Best CRM') may not match Spanish search behavior ('mejor CRM para pequeñas empresas'). Without a locale-optimized title, you're invisible.",
-                  ar: "Arabic Google searches tend to be question-based ('ما هو أفضل برنامج'). Titles that don't include Arabic question patterns or common phrases get much lower click-through rates.",
-                  zh: "Baidu (China's top search engine) gives extra weight to titles. A Chinese user won't click a result that doesn't immediately signal relevance — the title must use the exact search term they typed.",
+                  ar: "Arabic Google searches tend to be question-based. Titles that don't include Arabic question patterns get much lower click-through rates.",
+                  zh: "Baidu gives extra weight to titles. A Chinese user won't click a result that doesn't immediately signal relevance — the title must use the exact search term they typed.",
                   ja: "Japanese titles must balance keyword density differently — stuffing keywords looks spammy in Japanese. Titles should use natural phrasing that matches conversational Japanese search patterns.",
                 },
                 "missing-meta-description": {
-                  es: "Spanish descriptions need to match the region — Mexican users respond to direct, benefit-focused copy; Spanish users prefer formal, feature-focused descriptions. A generic description loses both audiences.",
-                  ar: "Arabic reads right-to-left. If your meta description starts with English or has mixed directionality, it renders incorrectly in Google's Arabic search results — showing garbled text in the snippet.",
-                  zh: "Chinese descriptions must be under ~78 Chinese characters (not 160 English characters) or they get cut off. Chinese characters are wider — Google's snippet length is measured in pixels, not characters.",
+                  es: "Spanish descriptions need to match the region — Mexican users respond to direct, benefit-focused copy; Spanish users prefer formal, feature-focused descriptions.",
+                  ar: "Arabic reads right-to-left. If your meta description has mixed directionality, it renders incorrectly in Google's Arabic search results.",
+                  zh: "Chinese descriptions must be under ~78 Chinese characters (not 160 English characters) or they get cut off — Google's snippet length is measured in pixels.",
                 },
                 "untranslated-aria-labels": {
-                  es: "In Latin America, web accessibility litigation is rising rapidly — Brazil mandated WCAG compliance in 2023. A blind Spanish-speaking user who hears English aria-labels will immediately abandon your site and associate it with poor quality.",
-                  ar: "Arabic screen readers (JAWS, NVDA with Arabic support) expect right-to-left reading order. English aria-labels mixed into Arabic content cause screen readers to switch reading direction mid-sentence — deeply disorienting.",
-                  fr: "France has strict accessibility laws (RGAA). Blind French users expect perfect French screen reader output — English labels are considered a legal compliance failure, not just a UX issue.",
-                  de: "Germany's BFSG (Barrierefreiheitsstärkungsgesetz) requires digital accessibility for most commercial websites by 2025. Untranslated ARIA labels are a compliance risk.",
-                  ja: "Japanese screen reader users (PC-Talker is dominant) expect precise Japanese phrasing. Direct translations of English labels often sound robotic in Japanese — a native speaker would never say them that way.",
+                  es: "In Latin America, web accessibility litigation is rising rapidly. A blind Spanish-speaking user who hears English aria-labels will immediately abandon your site.",
+                  ar: "Arabic screen readers expect right-to-left reading order. English aria-labels mixed into Arabic content cause screen readers to switch reading direction mid-sentence.",
+                  fr: "France has strict accessibility laws (RGAA). English labels are considered a legal compliance failure, not just a UX issue.",
+                  de: "Germany's BFSG requires digital accessibility for most commercial websites by 2025. Untranslated ARIA labels are a compliance risk.",
+                  ja: "Japanese screen reader users expect precise Japanese phrasing. Direct translations of English labels often sound robotic — a native speaker would never say them that way.",
                 },
                 "untranslated-sr-only": {
-                  ar: "Screen reader text in Arabic must follow Arabic grammatical gender rules — buttons and actions have gendered forms. English sr-only text skips this entirely, making the experience feel broken to Arabic screen reader users.",
-                  es: "Spanish has gendered nouns — 'nuevo tab' vs 'nueva pestaña'. An English sr-only text like 'opens in new tab' translated literally sounds grammatically wrong. Native speakers notice immediately.",
+                  ar: "Screen reader text in Arabic must follow Arabic grammatical gender rules. English sr-only text skips this entirely, making the experience feel broken.",
+                  es: "Spanish has gendered nouns — an English sr-only text like 'opens in new tab' translated literally sounds grammatically wrong. Native speakers notice immediately.",
                 },
                 "invalid-schema": {
-                  es: "Google's Spanish-language rich results (FAQ boxes, star ratings) require valid schema. Spanish-speaking users heavily rely on rich snippets to decide what to click — invalid schema removes you from these premium positions.",
-                  zh: "Baidu has its own structured data format (Baidu MIP). JSON-LD for Google does not help with Baidu rich results. If targeting Chinese users, you need both formats.",
-                  ja: "Japanese Google users have a very high reliance on rich results — product prices, reviews, and FAQ boxes dramatically increase CTR in Japan. Invalid schema means losing these high-visibility positions.",
+                  es: "Google's Spanish-language rich results require valid schema. Spanish-speaking users heavily rely on rich snippets — invalid schema removes you from premium positions.",
+                  zh: "Baidu has its own structured data format. JSON-LD for Google does not help with Baidu rich results.",
+                  ja: "Japanese Google users have very high reliance on rich results — invalid schema means losing high-visibility positions.",
                 },
                 "missing-og-tags": {
-                  es: "WhatsApp is the #1 social platform in Latin America. When a Spanish speaker shares your link on WhatsApp, broken OG tags show a blank preview — the link looks like spam and nobody clicks it.",
-                  ar: "WhatsApp and Telegram are dominant in Arabic-speaking countries. A link with no OG preview looks untrustworthy in Arab digital culture, where personal recommendations and visual context carry high social weight.",
-                  zh: "WeChat (not Facebook/Twitter) is how Chinese users share links. WeChat uses OG tags for link previews — without them, your shared link shows as a plain URL with no preview, which Chinese users associate with scam content.",
-                  ru: "VKontakte (VK), the dominant Russian social network, uses OG tags for link previews. Without them, shared links look broken on the platform most Russians actually use.",
+                  es: "WhatsApp is the #1 social platform in Latin America. Broken OG tags show a blank preview — the link looks like spam.",
+                  ar: "WhatsApp and Telegram are dominant in Arabic-speaking countries. No OG preview looks untrustworthy in Arab digital culture.",
+                  zh: "WeChat uses OG tags for link previews — without them, your shared link shows as a plain URL, which Chinese users associate with scam content.",
+                  ru: "VKontakte, the dominant Russian social network, uses OG tags for link previews. Without them, shared links look broken.",
                 },
               };
 
@@ -590,130 +546,150 @@ export default function DashboardPage() {
                 return LOCALE_CONTEXT[issueType]?.[localeRegion] || null;
               };
 
-              const ISSUE_META: Record<string, { title: string; plain: string; category: "SEO" | "ARIA" | "TECHNICAL"; catColor: string; fixMode: string; beforeEx: string; afterEx: string }> = {
+              // Before/after examples now reflect IN-PLACE replacement (not data attributes)
+              const locale = targetLocale.toUpperCase();
+              const ISSUE_META: Record<string, { title: string; plain: string; category: "SEO" | "ARIA" | "TECHNICAL"; catColor: string; beforeEx: string; afterEx: string }> = {
                 "missing-title": {
                   title: "No Page Title",
                   plain: "Google uses the page title as the blue clickable link in search results. Without one, your page appears as a raw URL — nobody clicks that.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
+                  category: "SEO", catColor: "var(--accent)",
                   beforeEx: `<head>\n  <!-- no <title> tag -->\n</head>`,
-                  afterEx: `<head>\n  <title>Your Page Title (50-60 chars)</title>\n</head>`,
+                  afterEx: `<title>Translated title for ${locale}\n  (50-60 chars, market keywords)</title>`,
                 },
                 "missing-meta-description": {
                   title: "No Search Preview Text",
-                  plain: "The meta description is the 2-line summary under the blue link on Google. Without it, Google picks random text from your page — usually bad.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
+                  plain: "The meta description is the 2-line summary under the blue link on Google. Without it, Google picks random text from your page.",
+                  category: "SEO", catColor: "var(--accent)",
                   beforeEx: `<head>\n  <!-- no meta description -->\n</head>`,
-                  afterEx: `<meta name="description"\n  content="Your 150-160 char summary..." />`,
+                  afterEx: `<meta name="description"\n  content="Translated for ${locale} (150-160 chars)" />`,
                 },
                 "missing-hreflang": {
                   title: "Google Doesn't Know Other Languages Exist",
-                  plain: "hreflang tags tell Google 'show the Spanish version to Spanish speakers'. Without them, Google shows your English page to everyone — even people who don't read English.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
+                  plain: `hreflang tags tell Google "show the ${locale} version to ${locale} speakers". Without them, Google shows your English page to everyone.`,
+                  category: "SEO", catColor: "var(--accent)",
                   beforeEx: `<head>\n  <!-- no language targeting -->\n</head>`,
-                  afterEx: `<link rel="alternate" hreflang="es"\n  href="https://site.com/es/" />\n<link rel="alternate" hreflang="x-default"\n  href="https://site.com/" />`,
+                  afterEx: `<link rel="alternate" hreflang="${targetLocale}"\n  href="https://site.com/${targetLocale}/" />\n<link rel="alternate" hreflang="x-default"\n  href="https://site.com/" />`,
                 },
                 "missing-og-tags": {
                   title: "No Social Share Preview",
-                  plain: "When someone shares your link on WhatsApp, Twitter, or LinkedIn, Open Graph tags control the image, title, and description that appear. Without them, shares look broken.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
+                  plain: "When someone shares your link on WhatsApp, Twitter, or LinkedIn, Open Graph tags control the preview. Without them, shares look broken.",
+                  category: "SEO", catColor: "var(--accent)",
                   beforeEx: `<!-- shared link shows blank card -->`,
-                  afterEx: `<meta property="og:title" content="..." />\n<meta property="og:description" content="..." />\n<meta property="og:image" content="/og.png" />`,
+                  afterEx: `<meta property="og:title"\n  content="Translated for ${locale}" />\n<meta property="og:description"\n  content="Translated for ${locale}" />`,
                 },
                 "missing-twitter-tags": {
                   title: "Twitter/X Shows Blank Card",
-                  plain: "Twitter has its own separate tag format. Without it, links shared on Twitter show no image or preview — just a plain URL.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
+                  plain: "Twitter has its own tag format. Without it, links shared on Twitter show no image or preview — just a plain URL.",
+                  category: "SEO", catColor: "var(--accent)",
                   beforeEx: `<!-- no twitter:card tag -->`,
                   afterEx: `<meta name="twitter:card"\n  content="summary_large_image" />`,
                 },
                 "untranslated-alt": {
                   title: "Image Labels Not Translated",
-                  plain: "Alt text describes images to search engines and blind users. Untranslated alt text means Google can't index your images in other languages, and blind users hear English in a foreign-language page.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
-                  beforeEx: `<img src="product.jpg"\n  alt="Blue running shoe" />`,
-                  afterEx: `<img src="product.jpg"\n  alt="Blue running shoe"\n  data-alt-es="Zapatilla azul"\n  data-alt-ar="حذاء ركض أزرق" />`,
+                  plain: "Alt text describes images to search engines and blind users. Untranslated alt text means Google can't index your images for other languages.",
+                  category: "SEO", catColor: "var(--accent)",
+                  beforeEx: `<img alt="Blue running shoe" />`,
+                  afterEx: `<img alt="[translated to ${locale}]" />`,
                 },
                 "unoptimized-headings": {
                   title: "Main Heading Not Translated",
                   plain: "The H1 heading is the most important text on your page for search engines. If it's only in English, you're invisible in every other language.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
-                  beforeEx: `<h1>Best Invoicing Software</h1>\n<!-- no translations -->`,
-                  afterEx: `<h1 data-lingo-es="Mejor software de facturación"\n    data-lingo-ar="أفضل برنامج فوترة">\n  Best Invoicing Software\n</h1>`,
+                  category: "SEO", catColor: "var(--accent)",
+                  beforeEx: `<h1>Best Invoicing Software</h1>`,
+                  afterEx: `<h1>[Translated to ${locale} with\n  market-specific keywords]</h1>`,
                 },
                 "missing-sitemap-locales": {
                   title: "Sitemap Missing Language Versions",
-                  plain: "A sitemap is a list of all your pages that you submit to Google. If it doesn't mention that your site has multiple languages, Google may never discover or index them.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
-                  beforeEx: `<url>\n  <loc>https://site.com/</loc>\n  <!-- no language alternates -->\n</url>`,
-                  afterEx: `<url>\n  <loc>https://site.com/</loc>\n  <xhtml:link rel="alternate" hreflang="es"\n    href="https://site.com/es/" />\n</url>`,
+                  plain: "Your sitemap doesn't mention that your site has multiple languages. Google may never discover or index them.",
+                  category: "SEO", catColor: "var(--accent)",
+                  beforeEx: `<url>\n  <loc>https://site.com/</loc>\n</url>`,
+                  afterEx: `<url>\n  <loc>https://site.com/</loc>\n  <xhtml:link hreflang="${targetLocale}"\n    href="https://site.com/${targetLocale}/" />\n</url>`,
                 },
                 "untranslated-aria-labels": {
                   title: "Buttons Unreadable to Blind Users",
-                  plain: "Screen readers (used by blind people) read aria-labels out loud. If your site is in Arabic but aria-labels are in English, a blind Arabic user hears a foreign language for every button they encounter.",
-                  category: "ARIA", catColor: "#60a5fa", fixMode: "ARIA + SCREEN READER",
-                  beforeEx: `<button aria-label="Close menu">\n  <!-- blind Arabic user hears English -->\n</button>`,
-                  afterEx: `<button aria-label="Close menu"\n  data-aria-ar="إغلاق القائمة"\n  data-aria-es="Cerrar menú">\n</button>`,
+                  plain: `Screen readers read aria-labels out loud. If your site targets ${locale} users but aria-labels are in English, blind users hear a foreign language for every button.`,
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<button aria-label="Close menu">\n  <!-- blind ${locale} user hears English -->`,
+                  afterEx: `<button aria-label="[translated to ${locale}]">\n  <!-- native-sounding, not literal -->`,
                 },
                 "untranslated-sr-only": {
                   title: "Screen Reader Text Not Translated",
-                  plain: ".sr-only elements are invisible text written purely for screen readers. They provide context like 'navigation menu' or 'opens in new tab'. If untranslated, blind users get English in the middle of any other language.",
-                  category: "ARIA", catColor: "#60a5fa", fixMode: "ARIA + SCREEN READER",
-                  beforeEx: `<span class="sr-only">Opens in new tab</span>\n<!-- invisible to sighted, but screen reader\n     reads English to Arabic users -->`,
-                  afterEx: `<span class="sr-only"\n  data-sr-ar="يفتح في تبويب جديد"\n  data-sr-es="Abre en nueva pestaña">\n  Opens in new tab\n</span>`,
+                  plain: ".sr-only elements are invisible text for screen readers. If untranslated, blind users get English in the middle of a foreign-language page.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<span class="sr-only">\n  Opens in new tab\n</span>`,
+                  afterEx: `<span class="sr-only">\n  [translated to ${locale}]\n</span>`,
                 },
                 "missing-html-lang": {
                   title: "Page Has No Language Declared",
-                  plain: "The lang attribute on the <html> tag tells browsers, screen readers, and Google what language this page is in. Without it, nothing knows — and translation tools may apply the wrong language.",
-                  category: "TECHNICAL", catColor: "#facc15", fixMode: "TECHNICAL",
+                  plain: "The lang attribute tells browsers, screen readers, and Google what language the page is in. Without it, nothing knows.",
+                  category: "TECHNICAL", catColor: "#facc15",
                   beforeEx: `<html>\n  <!-- browser guesses the language -->`,
-                  afterEx: `<html lang="en">\n  <!-- explicit: this page is English -->`,
+                  afterEx: `<html lang="${targetLocale}">`,
                 },
                 "missing-canonical": {
                   title: "No Canonical URL",
-                  plain: "If your site is accessible at multiple URLs (with/without www, http/https), Google treats them as duplicate pages and splits your ranking between them. A canonical tag says 'this is the real one'.",
-                  category: "TECHNICAL", catColor: "#facc15", fixMode: "TECHNICAL",
-                  beforeEx: `<!-- Google sees duplicates:\n  site.com/page\n  www.site.com/page\n  → splits ranking between them -->`,
+                  plain: "If your site is accessible at multiple URLs, Google splits your ranking between them. A canonical tag says 'this is the real one'.",
+                  category: "TECHNICAL", catColor: "#facc15",
+                  beforeEx: `<!-- Google sees duplicates →\n     splits ranking -->`,
                   afterEx: `<link rel="canonical"\n  href="https://site.com/page" />`,
                 },
                 "missing-viewport": {
                   title: "Mobile View Is Broken",
-                  plain: "Without a viewport meta tag, your site shows desktop layout on mobile — tiny text, horizontal scrolling. Google ranks mobile-friendly pages higher since 2018.",
-                  category: "TECHNICAL", catColor: "#facc15", fixMode: "TECHNICAL",
-                  beforeEx: `<!-- mobile users see desktop layout\n     at 10% zoom, impossible to read -->`,
+                  plain: "Without a viewport meta tag, your site shows desktop layout on mobile. Google ranks mobile-friendly pages higher since 2018.",
+                  category: "TECHNICAL", catColor: "#facc15",
+                  beforeEx: `<!-- mobile: desktop layout at 10% zoom -->`,
                   afterEx: `<meta name="viewport"\n  content="width=device-width,\n  initial-scale=1" />`,
                 },
                 "invalid-schema": {
-                  title: "Structured Data Using Deprecated Format",
-                  plain: "Schema markup is code that helps Google show rich results (star ratings, prices, FAQs). Using outdated schema types means Google ignores your structured data entirely.",
-                  category: "TECHNICAL", catColor: "#facc15", fixMode: "TECHNICAL",
-                  beforeEx: `{\n  "@type": "FAQPage",\n  // deprecated — Google ignores this\n}`,
-                  afterEx: `{\n  "@type": "WebPage",\n  // use supported types only\n}`,
+                  title: "Structured Data Deprecated",
+                  plain: "Schema markup helps Google show rich results (star ratings, prices, FAQs). Outdated types mean Google ignores your structured data.",
+                  category: "TECHNICAL", catColor: "#facc15",
+                  beforeEx: `{ "@type": "FAQPage" }\n// deprecated`,
+                  afterEx: `{ "@type": "WebPage" }\n// supported type`,
                 },
                 "missing-jsonld-localization": {
                   title: "Structured Data Not Translated",
-                  plain: "JSON-LD structured data helps Google understand your content for rich snippets. If it's only in English, Google can only surface those rich results for English searches.",
-                  category: "SEO", catColor: "var(--accent)", fixMode: "SEO METADATA",
-                  beforeEx: `{\n  "name": "Blue Running Shoe",\n  // only English\n}`,
-                  afterEx: `{\n  "name": "Blue Running Shoe",\n  "name-es": "Zapatilla azul de correr"\n}`,
+                  plain: "JSON-LD helps Google understand your content for rich snippets. If only in English, rich results only appear for English searches.",
+                  category: "SEO", catColor: "var(--accent)",
+                  beforeEx: `{ "name": "Blue Running Shoe" }`,
+                  afterEx: `{ "name": "[translated to ${locale}]" }`,
                 },
               };
 
-              const grouped = {
-                SEO: analysis.issues.filter(i => ISSUE_META[i.type]?.category === "SEO"),
-                ARIA: analysis.issues.filter(i => ISSUE_META[i.type]?.category === "ARIA"),
-                TECHNICAL: analysis.issues.filter(i => ISSUE_META[i.type]?.category === "TECHNICAL" || !ISSUE_META[i.type]),
+              // Determine which categories to show based on selected modes
+              const showSeo = fixModes.seo || fixModes.fullPage;
+              const showAria = fixModes.aria || fixModes.fullPage;
+
+              const grouped: Record<string, typeof analysis.issues> = {};
+              if (showSeo) {
+                grouped.SEO = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "SEO");
+              }
+              if (showAria) {
+                grouped.ARIA = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "ARIA");
+              }
+              // Technical always shown
+              grouped.TECHNICAL = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "TECHNICAL" || !ISSUE_META[i.type]);
+
+              // Deduplicate: only show one issue per type+filePath combo
+              for (const cat of Object.keys(grouped)) {
+                const seen = new Set<string>();
+                grouped[cat] = grouped[cat].filter(i => {
+                  const key = `${i.type}::${i.filePath}`;
+                  if (seen.has(key)) return false;
+                  seen.add(key);
+                  return true;
+                });
+              }
+
+              const catConfig: Record<string, { color: string; label: string; desc: string }> = {
+                SEO: { color: "var(--accent)", label: "SEO", desc: "Titles, descriptions, headings, alt text, hreflang, OG tags" },
+                ARIA: { color: "#60a5fa", label: "ARIA", desc: "aria-label attributes, .sr-only screen reader text" },
+                TECHNICAL: { color: "#facc15", label: "TECHNICAL", desc: "html lang, canonical, viewport, schema" },
               };
 
-              const catConfig = {
-                SEO: { color: "var(--accent)", label: "SEO", desc: "Fixed by: SEO METADATA mode", modeKey: "seo" as const },
-                ARIA: { color: "#60a5fa", label: "ARIA", desc: "Fixed by: ARIA + SCREEN READER mode", modeKey: "aria" as const },
-                TECHNICAL: { color: "#facc15", label: "TECHNICAL", desc: "Always fixed automatically", modeKey: null },
-              };
-
-              return (Object.entries(grouped) as [keyof typeof grouped, typeof analysis.issues][]).map(([cat, issues]) => {
+              return (Object.entries(grouped) as [string, typeof analysis.issues][]).map(([cat, issues]) => {
                 if (issues.length === 0) return null;
                 const cfg = catConfig[cat];
-                const modeActive = cfg.modeKey ? fixModes[cfg.modeKey] : true;
                 return (
                   <div key={cat} style={{ marginBottom: "24px" }}>
                     {/* Category header */}
@@ -732,13 +708,8 @@ export default function DashboardPage() {
                       <span style={{ fontSize: "9px", color: cfg.color, opacity: 0.6, letterSpacing: "0.1em" }}>
                         {issues.length} ISSUE{issues.length !== 1 ? "S" : ""}
                       </span>
-                      <span style={{
-                        marginLeft: "auto", fontSize: "9px", letterSpacing: "0.08em",
-                        color: modeActive ? cfg.color : "var(--fg-muted)",
-                        border: `1px solid ${modeActive ? cfg.color : "var(--border)"}`,
-                        padding: "2px 8px", opacity: modeActive ? 1 : 0.5,
-                      }}>
-                        {modeActive ? "✓ WILL BE FIXED" : cfg.modeKey ? "ENABLE MODE TO FIX" : "AUTO-FIXED"}
+                      <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.06em", marginLeft: "auto" }}>
+                        {cfg.desc}
                       </span>
                     </div>
 
@@ -754,7 +725,6 @@ export default function DashboardPage() {
                           background: "#0a0a0a",
                         }}>
                           <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: meta ? "10px" : 0 }}>
-                            {/* Severity dot */}
                             <div style={{
                               width: "6px", height: "6px", borderRadius: "50%",
                               background: sColor, marginTop: "5px", flexShrink: 0,
@@ -805,11 +775,11 @@ export default function DashboardPage() {
                             </div>
                           </div>
 
-                          {/* Before / After */}
+                          {/* Before / After — shows in-place replacement */}
                           {meta && (
                             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginLeft: "18px", marginTop: "10px" }}>
                               <div>
-                                <div style={{ fontSize: "8px", color: "#f87171", letterSpacing: "0.12em", marginBottom: "4px" }}>BEFORE (BROKEN)</div>
+                                <div style={{ fontSize: "8px", color: "#f87171", letterSpacing: "0.12em", marginBottom: "4px" }}>CURRENT (EN)</div>
                                 <pre style={{
                                   margin: 0, padding: "10px 12px",
                                   background: "rgba(248,113,113,0.05)",
@@ -821,7 +791,7 @@ export default function DashboardPage() {
                                 }}>{issue.currentValue || meta.beforeEx}</pre>
                               </div>
                               <div>
-                                <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.12em", marginBottom: "4px" }}>AFTER (FIXED BY LINGOSEO)</div>
+                                <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.12em", marginBottom: "4px" }}>AFTER ({locale})</div>
                                 <pre style={{
                                   margin: 0, padding: "10px 12px",
                                   background: "rgba(168,255,62,0.05)",
@@ -864,7 +834,7 @@ export default function DashboardPage() {
               </button>
               {!canFix && (
                 <span style={{ fontSize: "10px", color: "var(--fg-muted)", letterSpacing: "0.05em" }}>
-                  {!apiKey ? "ADD GEMINI API KEY" : !selectedModel ? "SELECT A GEMINI MODEL" : ""}
+                  {!selectedModel ? "SELECT A GEMINI MODEL" : ""}
                 </span>
               )}
             </div>
@@ -977,16 +947,6 @@ const labelStyle: React.CSSProperties = {
   color: "var(--fg-muted)",
   letterSpacing: "0.1em",
   marginBottom: "6px",
-};
-
-const thStyle: React.CSSProperties = {
-  padding: "10px 16px",
-  textAlign: "left",
-  fontSize: "10px",
-  color: "var(--fg-muted)",
-  fontWeight: 500,
-  letterSpacing: "0.1em",
-  fontFamily: "var(--font-mono)",
 };
 
 const accentBtnStyle: React.CSSProperties = {

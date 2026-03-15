@@ -1,20 +1,13 @@
 import { readFile, writeFile, mkdir } from "fs/promises";
-import { join, dirname } from "path";
+import { join, dirname, extname } from "path";
 import * as cheerio from "cheerio";
 import type { SeoIssue, FixResult } from "@/types";
 import {
-  translateText,
   translateObject,
-  batchTranslateText,
   translateHtml,
 } from "@/lib/translation/lingo-client";
-import {
-  optimizeSeoContent,
-  generateHreflangTags,
-  generateSitemapWithLocales,
-  calculateSeoScore,
-  callGemini,
-} from "@/lib/translation/seo-optimizer";
+import { generateSitemapWithLocales } from "@/lib/translation/seo-optimizer";
+import { log } from "@/lib/logger";
 
 interface FixModes {
   seo: boolean;
@@ -28,507 +21,181 @@ interface FixerParams {
   geminiApiKey: string;
   modelName: string;
   targetLocales: string[];
-  lingoApiKey: string;
   fixModes: FixModes;
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// One language in → one language out.
+//
+// Each PR/branch is a single locale. The fixer modifies the ACTUAL files:
+//   English content gets replaced with the target locale content.
+//
+// Translation flow for everything:
+//   extract strings → lingo.dev SDK → our /api/process/localize → Gemini
+//   Gemini knows the culture, search behavior, accessibility norms.
+//   Not machine translation — culturally accurate, market-specific.
+//
+// Modes:
+//   SEO  → replaces titles, descriptions, headings, alt text in-place
+//   ARIA → replaces aria-labels and sr-only text in-place
+//   FULL → replaces ALL text content in-place (via localizeHtml)
+// ──────────────────────────────────────────────────────────────────────────
+
 export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
-  const {
-    cloneDir,
-    issues,
-    geminiApiKey,
-    modelName,
-    targetLocales,
-    lingoApiKey,
-    fixModes,
-  } = params;
-
-  const SEO_ISSUE_TYPES = new Set([
-    "missing-title", "title-too-short", "title-too-long",
-    "missing-meta-description", "meta-description-too-long",
-    "missing-hreflang", "missing-og-tags", "missing-twitter-tags",
-    "missing-canonical", "missing-viewport", "missing-html-lang",
-    "unoptimized-headings", "missing-schema", "invalid-schema",
-  ]);
-
-  const ARIA_ISSUE_TYPES = new Set([
-    "untranslated-aria-labels", "untranslated-sr-only",
-  ]);
-
-  const filteredIssues = issues.filter((issue) => {
-    if (SEO_ISSUE_TYPES.has(issue.type)) return fixModes.seo;
-    if (ARIA_ISSUE_TYPES.has(issue.type)) return fixModes.aria;
-    return true;
-  });
-
-  // Group issues by file
-  const issuesByFile = new Map<string, SeoIssue[]>();
-  for (const issue of filteredIssues) {
-    const existing = issuesByFile.get(issue.filePath) || [];
-    existing.push(issue);
-    issuesByFile.set(issue.filePath, existing);
-  }
+  const { cloneDir, issues, targetLocales, fixModes } = params;
 
   const fixResults: FixResult[] = [];
   const globalLog: string[] = [];
+  const locale = targetLocales[0]; // one locale per PR
 
-  globalLog.push(`[FIXER] Starting — ${filteredIssues.length} issues across ${issuesByFile.size} files`);
-  globalLog.push(`[FIXER] Modes: SEO=${fixModes.seo} ARIA=${fixModes.aria} FULLPAGE=${fixModes.fullPage}`);
-  globalLog.push(`[FIXER] Target locales: ${targetLocales.join(", ") || "none"}`);
+  const modeLabel = [fixModes.seo && "SEO", fixModes.aria && "ARIA", fixModes.fullPage && "FULL-PAGE"].filter(Boolean).join("+");
+  globalLog.push(`[FIXER] Starting — ${modeLabel} → ${locale || "none"}`);
 
-  for (const [filePath, fileIssues] of issuesByFile) {
+  if (!locale) {
+    globalLog.push(`[FIXER] No target locale — nothing to translate`);
+    fixResults.push({ filePath: "__fixer_log__", originalContent: "", newContent: "", issuesFixed: [], log: globalLog });
+    return fixResults;
+  }
+
+  // Collect all unique files that have issues
+  const issueFiles = new Set(issues.map(i => i.filePath));
+
+  for (const filePath of issueFiles) {
+    if (filePath === "sitemap.xml") continue;
+
     const fullPath = join(cloneDir, filePath);
-    const isTsx = /\.(tsx|jsx|ts|js)$/.test(filePath);
-
     let content: string;
     try {
       content = await readFile(fullPath, "utf-8");
-      globalLog.push(`[READ] ${filePath} (${content.length} chars, ${isTsx ? "TSX/JSX → Gemini" : "HTML → Cheerio"})`);
     } catch {
-      if (filePath === "sitemap.xml" && targetLocales.length > 0) {
-        globalLog.push(`[SITEMAP] Creating sitemap.xml with ${targetLocales.length} locales`);
-        const sitemapResult = await createSitemap(cloneDir, targetLocales, geminiApiKey, modelName);
-        if (sitemapResult) {
-          sitemapResult.log = [`[SITEMAP] Created with locales: ${targetLocales.join(", ")}`];
-          fixResults.push(sitemapResult);
-          globalLog.push(`[SITEMAP] ✓ Created`);
-        }
-      } else {
-        globalLog.push(`[SKIP] ${filePath} — file not found`);
-      }
+      globalLog.push(`[SKIP] ${filePath} — not found`);
       continue;
     }
 
-    // ── TSX/JSX: Gemini understands React/Next.js patterns ──
-    if (isTsx) {
-      globalLog.push(`[GEMINI] Analyzing ${filePath} with ${fileIssues.length} issues...`);
-      try {
-        const result = await fixTsxWithGemini({
-          filePath, content, issues: fileIssues,
-          geminiApiKey, modelName, targetLocales,
-          lingoApiKey, fixModes,
-        });
-        if (result.newContent !== content) {
-          await writeFile(fullPath, result.newContent, "utf-8");
-          fixResults.push({
-            filePath,
-            originalContent: content,
-            newContent: result.newContent,
-            issuesFixed: result.fixedIssueIds,
-            log: result.log,
-          });
-          globalLog.push(`[GEMINI] ✓ ${filePath} — fixed ${result.fixedIssueIds.length} issues`);
-        } else {
-          globalLog.push(`[GEMINI] ⚠ ${filePath} — Gemini returned unchanged content`);
-        }
-      } catch (err) {
-        globalLog.push(`[GEMINI] ✗ ${filePath} — ${err instanceof Error ? err.message : String(err)}`);
-        console.error(`[FIXER] Gemini failed for ${filePath}:`, err);
-      }
-      continue;
-    }
-
-    // ── HTML: Cheerio path ──
     const originalContent = content;
-    const $ = cheerio.load(content);
+    const ext = extname(filePath).toLowerCase();
+    const isHtml = [".html", ".htm", ".php", ".ejs", ".astro", ".vue", ".svelte"].includes(ext);
+    const isTsx = [".tsx", ".jsx", ".ts", ".js"].includes(ext);
     const fixedIssueIds: string[] = [];
 
-    for (const issue of fileIssues) {
+    // ── FULL PAGE: translate everything via localizeHtml ─────────────
+    // This replaces all text content. If fullPage is on, we do this and
+    // skip SEO/ARIA since localizeHtml covers all text.
+    if (fixModes.fullPage && isHtml) {
+      log.info(`[FULL] ${filePath} → ${locale}`);
       try {
-        switch (issue.type) {
-          case "missing-html-lang": {
-            $("html").attr("lang", "en");
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "missing-title": {
-            if ($("title").length === 0) {
-              $("head").append("<title></title>");
-            }
-            const currentTitle = $("title").text() || "";
-
-            if (lingoApiKey && currentTitle) {
-              // Step 1: Use lingo.dev to translate title to all target locales
-              // This creates the base translations
-              const translations = await batchTranslateText(
-                lingoApiKey,
-                currentTitle,
-                "en",
-                targetLocales,
-                geminiApiKey,
-                modelName
-              );
-
-              // Step 2: Use Gemini to optimize translations for search keywords
-              for (const [locale, translated] of Object.entries(translations)) {
-                const optimized = await optimizeSeoContent({
-                  geminiApiKey,
-                  modelName,
-                  content: translated,
-                  locale,
-                  contentType: "title tag",
-                  context: `Original English: "${currentTitle}". This was translated by lingo.dev. Now optimize the translated text for SEO search intent in locale "${locale}". Use keywords people actually search for.`,
-                });
-                translations[locale] = optimized;
-              }
-
-              // Store translations as data attributes for locale routing
-              for (const [locale, text] of Object.entries(translations)) {
-                $("title").attr(`data-lingo-${locale}`, text);
-              }
-            }
-
-            if (!currentTitle) {
-              // Generate title with Gemini from page content
-              const pageText = $("body").text().slice(0, 500);
-              const generated = await optimizeSeoContent({
-                geminiApiKey,
-                modelName,
-                content: pageText,
-                locale: "en",
-                contentType: "title tag",
-                context: "Generate an SEO-optimized page title under 60 characters.",
-              });
-              $("title").text(generated);
-            }
-
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "missing-meta-description": {
-            const existing = $('meta[name="description"]');
-            let descContent = existing.attr("content") || "";
-
-            if (existing.length === 0 || !descContent.trim() || descContent.length < 50) {
-              // Generate/improve description with Gemini
-              const pageText = $("body").text().slice(0, 500);
-              const generated = await optimizeSeoContent({
-                geminiApiKey,
-                modelName,
-                content: descContent || pageText,
-                locale: "en",
-                contentType: "meta description",
-                context: "Write a meta description of 120-160 characters for search results.",
-              });
-
-              if (existing.length === 0) {
-                $("head").append(
-                  `<meta name="description" content="${generated.replace(/"/g, "&quot;")}" />`
-                );
-              } else {
-                existing.attr("content", generated);
-              }
-              descContent = generated;
-            }
-
-            // Translate description to all locales via lingo.dev
-            if (lingoApiKey && descContent && targetLocales.length > 0) {
-              const translations = await batchTranslateText(
-                lingoApiKey,
-                descContent,
-                "en",
-                targetLocales,
-                geminiApiKey,
-                modelName
-              );
-
-              // Optimize each translation for SEO
-              for (const [locale, translated] of Object.entries(translations)) {
-                const optimized = await optimizeSeoContent({
-                  geminiApiKey,
-                  modelName,
-                  content: translated,
-                  locale,
-                  contentType: "meta description",
-                  context: `Original English: "${descContent}". Translated by lingo.dev. Optimize for search intent in "${locale}". Keep 120-160 chars.`,
-                });
-                translations[locale] = optimized;
-              }
-
-              // Add locale-specific meta tags as comments for developer reference
-              const metaComment = Object.entries(translations)
-                .map(([locale, text]) => `<!-- ${locale}: ${text.replace(/--/g, "- -")} -->`)
-                .join("\n    ");
-              $('meta[name="description"]').after("\n    " + metaComment);
-            }
-
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "missing-og-tags": {
-            const title = $("title").text() || "";
-            const desc = $('meta[name="description"]').attr("content") || "";
-
-            if ($('meta[property="og:title"]').length === 0 && title) {
-              $("head").append(
-                `<meta property="og:title" content="${title.replace(/"/g, "&quot;")}" />`
-              );
-            }
-            if ($('meta[property="og:description"]').length === 0 && desc) {
-              $("head").append(
-                `<meta property="og:description" content="${desc.replace(/"/g, "&quot;")}" />`
-              );
-            }
-            if ($('meta[property="og:image"]').length === 0) {
-              $("head").append(
-                `<meta property="og:image" content="/og-image.png" />`
-              );
-            }
-            if ($('meta[property="og:type"]').length === 0) {
-              $("head").append(
-                `<meta property="og:type" content="website" />`
-              );
-            }
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "missing-twitter-tags": {
-            if ($('meta[name="twitter:card"]').length === 0) {
-              $("head").append(
-                `<meta name="twitter:card" content="summary_large_image" />`
-              );
-            }
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "missing-hreflang": {
-            if (targetLocales.length > 0) {
-              const tags = await generateHreflangTags({
-                geminiApiKey,
-                modelName,
-                baseUrl: "",
-                locales: ["en", ...targetLocales],
-                currentPath: "/" + filePath.replace(/\\/g, "/"),
-              });
-              $("head").append("\n" + tags + "\n");
-              fixedIssueIds.push(issue.id);
-            }
-            break;
-          }
-
-          case "untranslated-alt": {
-            // Translate alt text using lingo.dev SDK
-            const imgElements = $("img").toArray();
-            for (const el of imgElements) {
-              const alt = $(el).attr("alt");
-              if (!alt || !alt.trim()) {
-                const src = $(el).attr("src") || "image";
-                const filename =
-                  src.split("/").pop()?.replace(/\.[^.]+$/, "") || "image";
-                const readableAlt = filename.replace(/[-_]/g, " ");
-                $(el).attr("alt", readableAlt);
-
-                // Translate alt text to all locales via lingo.dev
-                if (lingoApiKey && targetLocales.length > 0) {
-                  const translations = await batchTranslateText(
-                    lingoApiKey,
-                    readableAlt,
-                    "en",
-                    targetLocales,
-                    geminiApiKey,
-                    modelName
-                  );
-                  // Store as data attributes
-                  for (const [locale, text] of Object.entries(translations)) {
-                    $(el).attr(`data-alt-${locale}`, text);
-                  }
-                }
-              }
-            }
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "unoptimized-headings": {
-            // Translate headings using lingo.dev
-            if (lingoApiKey && targetLocales.length > 0) {
-              const h1 = $("h1").first();
-              const h1Text = h1.text();
-              if (h1Text) {
-                const translations = await batchTranslateText(
-                  lingoApiKey,
-                  h1Text,
-                  "en",
-                  targetLocales,
-                  geminiApiKey,
-                  modelName
-                );
-                // Store locale translations as data attributes
-                for (const [locale, text] of Object.entries(translations)) {
-                  h1.attr(`data-lingo-${locale}`, text);
-                }
-              }
-            }
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "untranslated-aria-labels": {
-            // Collect ALL aria-label strings in the file into one object
-            // then use lingo.dev's translateObject() — ONE call per locale
-            // translates ALL of them at once
-            if (!lingoApiKey || targetLocales.length === 0) break;
-
-            const ariaMap: Record<string, string> = {};
-            $("[aria-label]").each((i, el) => {
-              const val = $(el).attr("aria-label") || "";
-              if (val.trim()) ariaMap[`aria_${i}`] = val;
-            });
-
-            if (Object.keys(ariaMap).length === 0) {
-              fixedIssueIds.push(issue.id);
-              break;
-            }
-
-            for (const locale of targetLocales) {
-              const translated = await translateObject(
-                lingoApiKey,
-                ariaMap,
-                "en",
-                locale,
-                geminiApiKey,
-                "aria",
-                modelName
-              );
-
-              $("[aria-label]").each((i, el) => {
-                const key = `aria_${i}`;
-                if (translated[key]) {
-                  $(el).attr(`data-aria-${locale}`, translated[key]);
-                }
-              });
-            }
-
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          case "untranslated-sr-only": {
-            // Same pattern: collect ALL sr-only text → translateObject() → write back
-            if (!lingoApiKey || targetLocales.length === 0) break;
-
-            const srSelectors = [
-              ".sr-only",
-              ".visually-hidden",
-              ".screen-reader-only",
-              ".screen-reader-text",
-              '[class*="sr-only"]',
-              '[class*="visually-hidden"]',
-            ].join(", ");
-
-            const srMap: Record<string, string> = {};
-            $(srSelectors).each((i, el) => {
-              const text = $(el).text().trim();
-              if (text) srMap[`sr_${i}`] = text;
-            });
-
-            if (Object.keys(srMap).length === 0) {
-              fixedIssueIds.push(issue.id);
-              break;
-            }
-
-            for (const locale of targetLocales) {
-              const translated = await translateObject(
-                lingoApiKey,
-                srMap,
-                "en",
-                locale,
-                geminiApiKey,
-                "aria",
-                modelName
-              );
-
-              $(srSelectors).each((i, el) => {
-                const key = `sr_${i}`;
-                if (translated[key]) {
-                  $(el).attr(`data-sr-${locale}`, translated[key]);
-                }
-              });
-            }
-
-            fixedIssueIds.push(issue.id);
-            break;
-          }
-
-          default:
-            break;
-        }
+        const translated = await translateHtml(content, "en", locale);
+        content = translated;
+        fixedIssueIds.push("full-page");
+        log.ok(`[FULL] ✓ ${filePath}`);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        globalLog.push(`[CHEERIO] ✗ ${issue.type} in ${filePath}: ${msg}`);
-        console.error(`[FIXER] Failed to fix ${issue.type} in ${filePath}:`, err);
+        log.err(`[FULL] ✗ ${filePath}`, err);
+        globalLog.push(`[FULL] ✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
-    if (fixedIssueIds.length > 0) {
-      const newContent = $.html();
-      await writeFile(fullPath, newContent, "utf-8");
-      globalLog.push(`[CHEERIO] ✓ ${filePath} — fixed: ${fixedIssueIds.join(", ")}`);
+    // For TSX + full page: extract all visible text, translate, replace
+    if (fixModes.fullPage && isTsx) {
+      log.info(`[FULL] ${filePath} → ${locale} (TSX)`);
+      try {
+        content = await translateTsxContent(content, locale);
+        fixedIssueIds.push("full-page");
+        log.ok(`[FULL] ✓ ${filePath}`);
+      } catch (err) {
+        log.err(`[FULL] ✗ ${filePath}`, err);
+        globalLog.push(`[FULL] ✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+
+    // ── SEO: replace titles, descriptions, headings, alt text ────────
+    if (fixModes.seo && !fixModes.fullPage) {
+      if (isHtml) {
+        try {
+          content = await translateHtmlSeo(content, locale);
+          fixedIssueIds.push("seo");
+          log.ok(`[SEO] ✓ ${filePath} → ${locale}`);
+        } catch (err) {
+          log.err(`[SEO] ✗ ${filePath}`, err);
+        }
+      }
+      if (isTsx) {
+        try {
+          content = await translateTsxSeo(content, locale);
+          fixedIssueIds.push("seo");
+          log.ok(`[SEO] ✓ ${filePath} → ${locale}`);
+        } catch (err) {
+          log.err(`[SEO] ✗ ${filePath}`, err);
+        }
+      }
+    }
+
+    // ── ARIA: replace aria-labels and sr-only text ───────────────────
+    if (fixModes.aria && !fixModes.fullPage) {
+      if (isHtml) {
+        try {
+          content = await translateHtmlAria(content, locale);
+          fixedIssueIds.push("aria");
+          log.ok(`[ARIA] ✓ ${filePath} → ${locale}`);
+        } catch (err) {
+          log.err(`[ARIA] ✗ ${filePath}`, err);
+        }
+      }
+      if (isTsx) {
+        try {
+          content = await translateTsxAria(content, locale);
+          fixedIssueIds.push("aria");
+          log.ok(`[ARIA] ✓ ${filePath} → ${locale}`);
+        } catch (err) {
+          log.err(`[ARIA] ✗ ${filePath}`, err);
+        }
+      }
+    }
+
+    // Write modified file back
+    if (content !== originalContent && fixedIssueIds.length > 0) {
+      await writeFile(fullPath, content, "utf-8");
       fixResults.push({
         filePath,
         originalContent,
-        newContent,
+        newContent: content,
         issuesFixed: fixedIssueIds,
-        log: fixedIssueIds.map(id => `Fixed ${id}`),
+        log: [`${filePath} — ${fixedIssueIds.join(", ")} → ${locale}`],
       });
-    } else {
-      globalLog.push(`[CHEERIO] ⚠ ${filePath} — no fixes applied (${fileIssues.length} issues found but no HTML elements matched)`);
+      globalLog.push(`[WRITE] ✓ ${filePath} — ${fixedIssueIds.join(", ")}`);
     }
   }
 
-  // Full page translation using lingo.dev localizeHtml
-  if (fixModes.fullPage && lingoApiKey && targetLocales.length > 0) {
-    for (const [filePath] of issuesByFile) {
-      const fullPath = join(cloneDir, filePath);
-      try {
-        const html = await readFile(fullPath, "utf-8");
-        for (const locale of targetLocales) {
-          const translated = await translateHtml(lingoApiKey, html, "en", locale);
-          const localePath = filePath.replace(/(\.[^.]+)$/, `.${locale}$1`);
-          const localeFullPath = join(cloneDir, localePath);
-          await mkdir(dirname(localeFullPath), { recursive: true });
-          await writeFile(localeFullPath, translated, "utf-8");
-          fixResults.push({
-            filePath: localePath,
-            originalContent: "",
-            newContent: translated,
-            issuesFixed: [`full-page-${locale}`],
-          });
-        }
-      } catch {
-        // skip files that can't be read
-      }
+  // ── Sitemap with locale alternates ──────────────────────────────────
+  if (issues.some(i => i.type === "missing-sitemap-locales")) {
+    try {
+      const sitemap = generateSitemapWithLocales({
+        baseUrl: "",
+        locales: ["en", locale],
+        pages: ["/"],
+      });
+
+      const sitemapDir = join(cloneDir, "public");
+      await mkdir(sitemapDir, { recursive: true });
+      await writeFile(join(sitemapDir, "sitemap.xml"), sitemap, "utf-8");
+
+      fixResults.push({
+        filePath: join("public", "sitemap.xml"),
+        originalContent: "",
+        newContent: sitemap,
+        issuesFixed: ["sitemap-locales"],
+      });
+      log.ok(`[SITEMAP] ✓ en + ${locale}`);
+    } catch (err) {
+      log.err("[SITEMAP] ✗", err);
     }
   }
 
-  // Generate locale JSON files with translated SEO metadata using lingo.dev
-  if (lingoApiKey && targetLocales.length > 0) {
-    const seoMetadata = extractSeoMetadata(fixResults);
-    if (Object.keys(seoMetadata).length > 0) {
-      const localeFilesResult = await generateLocaleFiles(
-        cloneDir,
-        seoMetadata,
-        targetLocales,
-        lingoApiKey,
-        geminiApiKey,
-        modelName
-      );
-      fixResults.push(...localeFilesResult);
-    }
-  }
+  // ── Done ────────────────────────────────────────────────────────────
+  globalLog.push(`[FIXER] Done — ${fixResults.length} files modified → ${locale}`);
 
-  globalLog.push(`[FIXER] Done — ${fixResults.length} files modified`);
-
-  // Attach global log to first result so it surfaces in the PR
   if (fixResults.length > 0) {
     fixResults[0].log = [...globalLog, ...(fixResults[0].log || [])];
   } else {
-    // No fixes — return a dummy entry so the log is accessible
     fixResults.push({
       filePath: "__fixer_log__",
       originalContent: "",
@@ -541,229 +208,246 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
   return fixResults;
 }
 
-// ── Gemini-powered TSX/JSX fixer ──────────────────────────────────────────
 
-async function fixTsxWithGemini(params: {
-  filePath: string;
-  content: string;
-  issues: SeoIssue[];
-  geminiApiKey: string;
-  modelName: string;
-  targetLocales: string[];
-  lingoApiKey: string;
-  fixModes: FixModes;
-}): Promise<{ newContent: string; fixedIssueIds: string[]; log: string[] }> {
-  const { filePath, content, issues, geminiApiKey, modelName, targetLocales, fixModes, lingoApiKey } = params;
-  const log: string[] = [];
+// ── HTML translations ──────────────────────────────────────────────────
 
-  // Collect SEO strings for lingo.dev translation first
-  const seoStrings: Record<string, string> = {};
-  issues.forEach((issue, i) => {
-    if (issue.currentValue) seoStrings[`issue_${i}`] = issue.currentValue;
+async function translateHtmlSeo(html: string, locale: string): Promise<string> {
+  const $ = cheerio.load(html);
+
+  // Collect all SEO strings into one object
+  const strings: Record<string, string> = {};
+
+  const title = $("title").text().trim();
+  if (title) strings["title"] = title;
+
+  const desc = $('meta[name="description"]').attr("content")?.trim();
+  if (desc) strings["description"] = desc;
+
+  $("h1, h2, h3").each((i, el) => {
+    const text = $(el).text().trim();
+    if (text) strings[`h_${i}`] = text;
   });
 
-  // Batch translate with lingo.dev if we have strings and locales
-  let translations: Record<string, Record<string, string>> = {};
-  if (lingoApiKey && targetLocales.length > 0 && Object.keys(seoStrings).length > 0) {
-    log.push(`[LINGO] Batch translating ${Object.keys(seoStrings).length} strings to ${targetLocales.length} locales`);
-    for (const locale of targetLocales) {
-      try {
-        translations[locale] = await translateObject(lingoApiKey, seoStrings, "en", locale, geminiApiKey, "seo", modelName);
-        log.push(`[LINGO] ✓ ${locale}: ${Object.keys(translations[locale]).length} strings translated`);
-      } catch (err) {
-        log.push(`[LINGO] ✗ ${locale}: ${err instanceof Error ? err.message : String(err)}`);
-      }
+  $("img[alt]").each((i, el) => {
+    const alt = $(el).attr("alt")?.trim();
+    if (alt) strings[`alt_${i}`] = alt;
+  });
+
+  const ogTitle = $('meta[property="og:title"]').attr("content")?.trim();
+  if (ogTitle) strings["og_title"] = ogTitle;
+  const ogDesc = $('meta[property="og:description"]').attr("content")?.trim();
+  if (ogDesc) strings["og_description"] = ogDesc;
+
+  if (Object.keys(strings).length === 0) return html;
+
+  // One call to lingo.dev → Gemini translates all SEO strings at once
+  const translated = await translateObject(strings, "en", locale);
+
+  // Write translations back into the HTML
+  if (translated["title"]) $("title").text(translated["title"]);
+  if (translated["description"]) $('meta[name="description"]').attr("content", translated["description"]);
+
+  $("h1, h2, h3").each((i, el) => {
+    if (translated[`h_${i}`]) $(el).text(translated[`h_${i}`]);
+  });
+
+  $("img[alt]").each((i, el) => {
+    if (translated[`alt_${i}`]) $(el).attr("alt", translated[`alt_${i}`]);
+  });
+
+  if (translated["og_title"]) $('meta[property="og:title"]').attr("content", translated["og_title"]);
+  if (translated["og_description"]) $('meta[property="og:description"]').attr("content", translated["og_description"]);
+
+  // Update html lang
+  $("html").attr("lang", locale);
+
+  return $.html();
+}
+
+async function translateHtmlAria(html: string, locale: string): Promise<string> {
+  const $ = cheerio.load(html);
+  const strings: Record<string, string> = {};
+
+  $("[aria-label]").each((i, el) => {
+    const val = $(el).attr("aria-label")?.trim();
+    if (val) strings[`aria_${i}`] = val;
+  });
+
+  const srSel = ".sr-only, .visually-hidden, .screen-reader-only, .screen-reader-text";
+  $(srSel).each((i, el) => {
+    const text = $(el).text().trim();
+    if (text) strings[`sr_${i}`] = text;
+  });
+
+  if (Object.keys(strings).length === 0) return html;
+
+  const translated = await translateObject(strings, "en", locale);
+
+  $("[aria-label]").each((i, el) => {
+    if (translated[`aria_${i}`]) $(el).attr("aria-label", translated[`aria_${i}`]);
+  });
+
+  $(srSel).each((i, el) => {
+    if (translated[`sr_${i}`]) $(el).text(translated[`sr_${i}`]);
+  });
+
+  return $.html();
+}
+
+
+// ── TSX translations ───────────────────────────────────────────────────
+// For TSX we can't use Cheerio (it's not HTML). We use regex to find
+// translatable strings and replace them. The file structure stays intact.
+
+async function translateTsxSeo(content: string, locale: string): Promise<string> {
+  const strings: Record<string, string> = {};
+
+  // Metadata strings
+  const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
+  if (titleMatch) strings["title"] = titleMatch[1];
+  const descMatch = content.match(/description:\s*["']([^"']+)["']/);
+  if (descMatch) strings["description"] = descMatch[1];
+
+  // Headings in JSX
+  const headingMatches = [...content.matchAll(/<h[1-3][^>]*>([^<{]{2,200})<\/h[1-3]>/g)];
+  headingMatches.forEach((m, i) => { strings[`h_${i}`] = m[1].trim(); });
+
+  // Alt text
+  const altMatches = [...content.matchAll(/alt=["']([^"']{2,})["']/g)];
+  altMatches.forEach((m, i) => { strings[`alt_${i}`] = m[1]; });
+
+  if (Object.keys(strings).length === 0) return content;
+
+  const translated = await translateObject(strings, "en", locale);
+  let result = content;
+
+  // Replace title in metadata
+  if (translated["title"] && titleMatch) {
+    result = result.replace(titleMatch[0], titleMatch[0].replace(titleMatch[1], translated["title"]));
+  }
+  if (translated["description"] && descMatch) {
+    result = result.replace(descMatch[0], descMatch[0].replace(descMatch[1], translated["description"]));
+  }
+
+  // Replace headings — go in reverse to preserve indices
+  for (let i = headingMatches.length - 1; i >= 0; i--) {
+    if (translated[`h_${i}`]) {
+      const m = headingMatches[i];
+      const original = m[0];
+      const replaced = original.replace(m[1], translated[`h_${i}`]);
+      result = result.replace(original, replaced);
     }
   }
 
-  const issueList = issues
-    .map(i => `- [${i.severity.toUpperCase()}] ${i.type}: ${i.message}${i.currentValue ? ` (current: "${i.currentValue}")` : ""}`)
-    .join("\n");
-
-  const localeBlock = targetLocales.length > 0
-    ? `\nTARGET LOCALES: ${targetLocales.join(", ")} — add translated versions as described below.`
-    : "";
-
-  const seoInstructions = fixModes.seo ? `
-SEO FIXES (this is a Next.js App Router project):
-- Add or update: export const metadata: Metadata = { title: "...", description: "...", openGraph: { title, description, images }, twitter: { card: "summary_large_image" }, alternates: { canonical: "/", languages: { ${targetLocales.map(l => `"${l}": "/${l}"`).join(", ")} } } }
-- Add if missing: export const viewport: Viewport = { width: "device-width", initialScale: 1 }
-- Import Metadata and Viewport from "next"
-- Title: 50-60 chars, include primary keyword. Description: 150-160 chars, compelling.
-- For hreflang: use metadata.alternates.languages with ISO 639-1 codes` : "";
-
-  const ariaInstructions = fixModes.aria ? `
-ARIA FIXES:
-- Find all aria-label="..." in JSX
-- Add data-aria-{locale}="translated" attributes for each target locale
-- Find className="sr-only" elements, add data-sr-{locale}="translated"
-- Use lingo.dev translated values if available` : "";
-
-  const fullPageInstructions = fixModes.fullPage ? `
-FULL PAGE:
-- Wrap visible text strings in translation-ready format
-- Add data-locale attributes to mark translatable sections` : "";
-
-  const prompt = `You are an expert Next.js developer. Fix SEO and accessibility issues in this file.
-
-FILE: ${filePath}
-ISSUES TO FIX:
-${issueList}
-${localeBlock}
-${seoInstructions}
-${ariaInstructions}
-${fullPageInstructions}
-
-CURRENT FILE CONTENT:
-${content.slice(0, 10000)}
-
-RULES:
-- Return ONLY the complete modified TypeScript/TSX file content
-- Do NOT wrap in markdown code blocks
-- Do NOT change visual styles, layout, or component logic
-- Only ADD metadata exports, viewport exports, and aria/data attributes
-- Preserve all existing imports and code exactly
-
-FIXED FILE:`;
-
-  log.push(`[GEMINI] Sending ${filePath} to ${modelName} (${issues.length} issues, ${content.length} chars)`);
-
-  const fixed = await callGemini(geminiApiKey, modelName, prompt);
-
-  if (!fixed || fixed.length < 50) {
-    log.push(`[GEMINI] ✗ Empty or too-short response (${fixed?.length ?? 0} chars)`);
-    throw new Error("Gemini returned empty response");
+  // Replace alt text
+  for (let i = altMatches.length - 1; i >= 0; i--) {
+    if (translated[`alt_${i}`]) {
+      const m = altMatches[i];
+      result = result.replace(m[0], m[0].replace(m[1], translated[`alt_${i}`]));
+    }
   }
 
-  // Strip markdown fences if Gemini added them anyway
-  const cleaned = fixed
-    .replace(/^```(?:tsx?|jsx?|typescript)?\n?/i, "")
-    .replace(/\n?```$/i, "")
-    .trim();
-
-  log.push(`[GEMINI] ✓ Response: ${cleaned.length} chars`);
-
-  return {
-    newContent: cleaned,
-    fixedIssueIds: issues.map(i => i.id),
-    log,
-  };
+  return result;
 }
 
-/**
- * Extract all SEO-relevant text from fixed files into a structured object
- */
-function extractSeoMetadata(
-  fixes: FixResult[]
-): Record<string, string> {
-  const metadata: Record<string, string> = {};
+async function translateTsxAria(content: string, locale: string): Promise<string> {
+  const strings: Record<string, string> = {};
 
-  for (const fix of fixes) {
-    const $ = cheerio.load(fix.newContent);
-    const title = $("title").text();
-    const desc = $('meta[name="description"]').attr("content");
-    const h1 = $("h1").first().text();
+  const ariaMatches = [...content.matchAll(/aria-label=["']([^"']+)["']/g)];
+  ariaMatches.forEach((m, i) => { strings[`aria_${i}`] = m[1]; });
 
-    if (title) metadata[`${fix.filePath}:title`] = title;
-    if (desc) metadata[`${fix.filePath}:description`] = desc;
-    if (h1) metadata[`${fix.filePath}:h1`] = h1;
+  const srMatches = [...content.matchAll(/className=["'][^"']*sr-only[^"']*["'][^>]*>([^<]{1,200})</g)];
+  srMatches.forEach((m, i) => { if (m[1].trim()) strings[`sr_${i}`] = m[1].trim(); });
+
+  if (Object.keys(strings).length === 0) return content;
+
+  const translated = await translateObject(strings, "en", locale);
+  let result = content;
+
+  // Replace aria-labels in-place
+  for (let i = ariaMatches.length - 1; i >= 0; i--) {
+    if (translated[`aria_${i}`]) {
+      const m = ariaMatches[i];
+      result = result.replace(m[0], m[0].replace(m[1], translated[`aria_${i}`]));
+    }
   }
 
-  return metadata;
+  // Replace sr-only text in-place
+  for (let i = srMatches.length - 1; i >= 0; i--) {
+    if (translated[`sr_${i}`]) {
+      const m = srMatches[i];
+      result = result.replace(m[0], m[0].replace(m[1], translated[`sr_${i}`]));
+    }
+  }
+
+  return result;
 }
 
-/**
- * Generate locale-specific JSON files with lingo.dev translated SEO content.
- * These files can be consumed by i18n frameworks.
- */
-async function generateLocaleFiles(
-  cloneDir: string,
-  seoMetadata: Record<string, string>,
-  targetLocales: string[],
-  lingoApiKey: string,
-  geminiApiKey?: string,
-  modelName?: string
-): Promise<FixResult[]> {
-  const results: FixResult[] = [];
-  const localesDir = join(cloneDir, "locales", "seo");
+async function translateTsxContent(content: string, locale: string): Promise<string> {
+  // For full page TSX: extract ALL visible text strings from JSX
+  const strings: Record<string, string> = {};
 
-  try {
-    await mkdir(localesDir, { recursive: true });
-  } catch {}
-
-  // Use lingo.dev's localizeObject to translate ALL metadata at once per locale
-  for (const locale of targetLocales) {
-    const translated = await translateObject(
-      lingoApiKey,
-      seoMetadata,
-      "en",
-      locale,
-      geminiApiKey,
-      "seo",
-      modelName
-    );
-
-    const filePath = join("locales", "seo", `${locale}.json`);
-    const fullPath = join(cloneDir, filePath);
-    const content = JSON.stringify(translated, null, 2);
-
-    await writeFile(fullPath, content, "utf-8");
-
-    results.push({
-      filePath,
-      originalContent: "",
-      newContent: content,
-      issuesFixed: [`seo-locale-${locale}`],
-    });
-  }
-
-  // Also write the source locale file
-  const sourceFilePath = join("locales", "seo", "en.json");
-  const sourceContent = JSON.stringify(seoMetadata, null, 2);
-  await writeFile(join(cloneDir, sourceFilePath), sourceContent, "utf-8");
-
-  results.push({
-    filePath: sourceFilePath,
-    originalContent: "",
-    newContent: sourceContent,
-    issuesFixed: ["seo-locale-en"],
+  // Text between JSX tags: >Some text<
+  const textMatches = [...content.matchAll(/>([^<>{]{3,300})</g)];
+  textMatches.forEach((m, i) => {
+    const text = m[1].trim();
+    // Skip things that aren't real text (CSS values, code, URLs)
+    if (text && !text.startsWith("//") && !text.startsWith("/*") &&
+        !text.includes("className") && !text.includes("style=") &&
+        !text.match(/^[a-z]+:\/\//) && !text.match(/^\s*$/)) {
+      strings[`t_${i}`] = text;
+    }
   });
 
-  return results;
-}
+  // Also catch metadata, headings, alt, aria (same as other modes)
+  const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
+  if (titleMatch) strings["title"] = titleMatch[1];
+  const descMatch = content.match(/description:\s*["']([^"']+)["']/);
+  if (descMatch) strings["description"] = descMatch[1];
 
-/**
- * Create sitemap.xml with locale alternates
- */
-async function createSitemap(
-  cloneDir: string,
-  targetLocales: string[],
-  geminiApiKey: string,
-  modelName: string
-): Promise<FixResult | null> {
-  try {
-    const sitemap = generateSitemapWithLocales({
-      baseUrl: "",
-      locales: ["en", ...targetLocales],
-      pages: ["/"],
-    });
+  const altMatches = [...content.matchAll(/alt=["']([^"']{2,})["']/g)];
+  altMatches.forEach((m, i) => { strings[`alt_${i}`] = m[1]; });
 
-    const sitemapPath = join("public", "sitemap.xml");
-    const fullPath = join(cloneDir, sitemapPath);
+  const ariaMatches = [...content.matchAll(/aria-label=["']([^"']+)["']/g)];
+  ariaMatches.forEach((m, i) => { strings[`aria_${i}`] = m[1]; });
 
-    try {
-      await mkdir(dirname(fullPath), { recursive: true });
-    } catch {}
+  if (Object.keys(strings).length === 0) return content;
 
-    await writeFile(fullPath, sitemap, "utf-8");
+  log.info(`[FULL] Extracted ${Object.keys(strings).length} strings from TSX`);
+  const translated = await translateObject(strings, "en", locale);
 
-    return {
-      filePath: sitemapPath,
-      originalContent: "",
-      newContent: sitemap,
-      issuesFixed: ["sitemap-locales"],
-    };
-  } catch {
-    return null;
+  let result = content;
+
+  // Replace all text matches — go in reverse order to preserve string positions
+  for (let i = textMatches.length - 1; i >= 0; i--) {
+    const key = `t_${i}`;
+    if (translated[key] && strings[key]) {
+      const m = textMatches[i];
+      result = result.replace(m[0], m[0].replace(m[1], translated[key]));
+    }
   }
+
+  // Replace metadata
+  if (translated["title"] && titleMatch) {
+    result = result.replace(titleMatch[0], titleMatch[0].replace(titleMatch[1], translated["title"]));
+  }
+  if (translated["description"] && descMatch) {
+    result = result.replace(descMatch[0], descMatch[0].replace(descMatch[1], translated["description"]));
+  }
+
+  // Replace alt text
+  for (let i = altMatches.length - 1; i >= 0; i--) {
+    if (translated[`alt_${i}`]) {
+      result = result.replace(altMatches[i][0], altMatches[i][0].replace(altMatches[i][1], translated[`alt_${i}`]));
+    }
+  }
+
+  // Replace aria-labels
+  for (let i = ariaMatches.length - 1; i >= 0; i--) {
+    if (translated[`aria_${i}`]) {
+      result = result.replace(ariaMatches[i][0], ariaMatches[i][0].replace(ariaMatches[i][1], translated[`aria_${i}`]));
+    }
+  }
+
+  return result;
 }

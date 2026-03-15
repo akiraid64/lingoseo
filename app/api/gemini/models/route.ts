@@ -1,9 +1,9 @@
 import { listGeminiModels } from "@/lib/gemini/models";
 
-export async function GET(req: Request) {
-  const apiKey = req.headers.get("x-gemini-api-key");
+export async function GET() {
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    return Response.json({ error: "Missing Gemini API key" }, { status: 401 });
+    return Response.json({ error: "GEMINI_API_KEY not configured on server" }, { status: 500 });
   }
 
   try {

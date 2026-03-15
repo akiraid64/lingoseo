@@ -3,23 +3,29 @@ import { log } from "@/lib/logger";
 
 export const maxDuration = 60;
 
-// This is LingoSEO's custom translation engine.
-// lingo.dev (or anything else) can POST here and get back
-// SEO-optimized, ARIA-aware, culturally accurate translations.
+// This route implements the lingo.dev SDK's /process/localize contract.
+// When we set apiUrl to our own server, the SDK calls this endpoint
+// for ALL translations — localizeObject, localizeText, localizeHtml.
+// The SDK handles batching, chunking, HTML parsing.
+// We handle the brain: Gemini translates with cultural + SEO + ARIA awareness.
 
 export async function POST(req: Request) {
   const geminiApiKey = process.env.GEMINI_API_KEY;
-
   if (!geminiApiKey) {
-    return Response.json({ error: "Missing Gemini API key" }, { status: 401 });
+    return Response.json({ error: "Missing GEMINI_API_KEY in server env" }, { status: 500 });
   }
 
   let body: {
     sourceLocale: string;
     targetLocale: string;
     data: Record<string, string>;
-    modelName?: string;
-    context?: "seo" | "aria" | "general";
+    params?: { fast?: boolean };
+    reference?: Record<string, Record<string, string>>;
+    hints?: Record<string, string>;
+    sessionId?: string;
+    engineId?: string;
+    triggerType?: string;
+    metadata?: { filePath?: string };
   };
 
   try {
@@ -28,19 +34,10 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const {
-    sourceLocale = "en",
-    targetLocale,
-    data,
-    modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash",
-    context = "general",
-  } = body;
+  const { sourceLocale, targetLocale, data } = body;
 
   if (!targetLocale || !data || typeof data !== "object") {
-    return Response.json(
-      { error: "Missing targetLocale or data" },
-      { status: 400 }
-    );
+    return Response.json({ error: "Missing targetLocale or data" }, { status: 400 });
   }
 
   const stringCount = Object.keys(data).length;
@@ -48,27 +45,64 @@ export async function POST(req: Request) {
     return Response.json({ data: {} });
   }
 
-  log.info(`Translate: ${sourceLocale} → ${targetLocale} | context: ${context} | ${stringCount} strings | model: ${modelName}`);
+  // Detect context from content patterns
+  const context = detectContext(data);
+  const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+
+  log.info(`Engine: ${sourceLocale} → ${targetLocale} | context: ${context} | ${stringCount} strings | model: ${modelName}`);
 
   try {
     const translated = await translateWithGemini({
       geminiApiKey,
       modelName,
-      sourceLocale,
+      sourceLocale: sourceLocale || "en",
       targetLocale,
       data,
       context,
     });
 
-    log.ok(`Translated ${Object.keys(translated).length} strings → ${targetLocale}`);
+    log.ok(`Engine translated ${Object.keys(translated).length} strings → ${targetLocale}`);
     return Response.json({ data: translated });
   } catch (err) {
-    log.err(`Translation failed (${sourceLocale}→${targetLocale})`, err);
+    log.err(`Engine translation failed (${sourceLocale}→${targetLocale})`, err);
     return Response.json(
       { error: err instanceof Error ? err.message : "Translation failed" },
       { status: 500 }
     );
   }
+}
+
+// Also need /users/me for SDK's identity tracking (it calls this on init)
+// We handle that in a separate route: app/api/users/me/route.ts
+
+/**
+ * Auto-detect what kind of content we're translating based on keys/values.
+ * The SDK doesn't tell us — we infer from the data itself.
+ */
+function detectContext(data: Record<string, string>): "seo" | "aria" | "general" {
+  const keys = Object.keys(data).join(" ").toLowerCase();
+  const values = Object.values(data).join(" ").toLowerCase();
+
+  // ARIA patterns: aria-label values, sr-only text
+  if (keys.includes("aria") || keys.includes("sr_") || keys.includes("screen")) {
+    return "aria";
+  }
+
+  // SEO patterns: title, description, og:, meta, canonical, hreflang
+  if (
+    keys.includes("title") || keys.includes("description") ||
+    keys.includes("og:") || keys.includes("meta") ||
+    keys.includes("canonical") || keys.includes("hreflang") ||
+    keys.includes("alt")
+  ) {
+    return "seo";
+  }
+
+  // Check values for SEO-like content lengths
+  const avgLen = values.length / Object.keys(data).length;
+  if (avgLen < 200) return "seo"; // short strings = likely metadata
+
+  return "general";
 }
 
 async function translateWithGemini(params: {
@@ -79,8 +113,7 @@ async function translateWithGemini(params: {
   data: Record<string, string>;
   context: "seo" | "aria" | "general";
 }): Promise<Record<string, string>> {
-  const { geminiApiKey, modelName, sourceLocale, targetLocale, data, context } =
-    params;
+  const { geminiApiKey, modelName, sourceLocale, targetLocale, data, context } = params;
 
   const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
@@ -129,7 +162,7 @@ TRANSLATED JSON:`;
     model: modelName,
     contents: prompt,
     config: {
-      temperature: 0.2, // low temperature = consistent, accurate translations
+      temperature: 0.2,
     },
   });
 
@@ -150,8 +183,7 @@ TRANSLATED JSON:`;
     }
     return result;
   } catch {
-    console.error("[translate engine] Failed to parse Gemini JSON:", cleaned);
-    // Fallback: return original strings
+    console.error("[engine] Failed to parse Gemini JSON:", cleaned);
     return data;
   }
 }

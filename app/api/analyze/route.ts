@@ -31,13 +31,13 @@ export async function POST(req: Request) {
     return Response.json({ error: "Invalid GitHub URL" }, { status: 400 });
   }
 
-  const geminiApiKey = req.headers.get("x-gemini-api-key") || undefined;
-  const geminiModel = req.headers.get("x-gemini-model") || "gemini-1.5-flash";
+  const geminiApiKey = process.env.GEMINI_API_KEY || undefined;
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
   if (geminiApiKey) {
     log.info(`Gemini: ${geminiModel} (semantic scan enabled)`);
   } else {
-    log.warn("No Gemini key — pattern-only scan");
+    log.warn("No GEMINI_API_KEY in env — pattern-only scan");
   }
 
   let cloneDir: string | null = null;

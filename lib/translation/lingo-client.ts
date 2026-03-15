@@ -1,83 +1,44 @@
 import { LingoDotDevEngine } from "lingo.dev/sdk";
+import { log } from "@/lib/logger";
+
+// ── Our engine: lingo.dev SDK pointed at OUR server ──────────────────────
+//
+// Architecture:
+//   lingo.dev SDK (apiUrl → our server)
+//     ↓ calls POST /api/process/localize
+//   Our route receives { sourceLocale, targetLocale, data }
+//     ↓ sends to Gemini with cultural/SEO/ARIA context
+//   Gemini translates intelligently
+//     ↓ returns translated data
+//   SDK gets translations, applies them (HTML parsing, batching, etc.)
+//
+// The SDK does the plumbing. Gemini does the thinking.
+// No lingo.dev dashboard config needed. Any locale, any time.
 
 let engineInstance: LingoDotDevEngine | null = null;
 
-export function getLingoEngine(apiKey: string): LingoDotDevEngine {
-  if (!engineInstance || (engineInstance as any).config.apiKey !== apiKey) {
-    engineInstance = new LingoDotDevEngine({ apiKey });
+function getEngine(): LingoDotDevEngine {
+  if (!engineInstance) {
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
+    engineInstance = new LingoDotDevEngine({
+      apiKey: "lingoseo-engine", // SDK requires a key — we auth via server env
+      apiUrl: `${baseUrl}/api`,  // SDK calls {apiUrl}/process/localize
+    });
+    log.info(`Engine connected → ${baseUrl}/api/process/localize`);
   }
   return engineInstance;
 }
 
 /**
- * Call our custom Gemini-powered translation engine at /api/translate.
- * This gives us SEO-aware, ARIA-aware, culturally accurate translations
- * without needing to configure each locale manually in lingo.dev dashboard.
- *
- * Falls back to lingo.dev SDK if geminiApiKey is not provided.
- */
-async function callOwnEngine(params: {
-  lingoApiKey: string;
-  geminiApiKey: string;
-  obj: Record<string, string>;
-  sourceLocale: string;
-  targetLocale: string;
-  context: "seo" | "aria" | "general";
-  modelName?: string;
-}): Promise<Record<string, string>> {
-  const { geminiApiKey, obj, sourceLocale, targetLocale, context, modelName } = params;
-
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000";
-
-  const res = await fetch(`${baseUrl}/api/translate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "x-gemini-api-key": geminiApiKey,
-    },
-    body: JSON.stringify({
-      sourceLocale,
-      targetLocale,
-      data: obj,
-      context,
-      modelName: modelName || process.env.GEMINI_MODEL || "gemini-2.0-flash",
-    }),
-  });
-
-  if (!res.ok) {
-    throw new Error(`Engine returned ${res.status}: ${await res.text()}`);
-  }
-
-  const json = await res.json();
-  return json.data || obj;
-}
-
-/**
  * Translate a single text string.
- * Uses our Gemini engine if geminiApiKey provided, else lingo.dev SDK.
+ * lingo.dev SDK → our /api/process/localize → Gemini
  */
 export async function translateText(
-  lingoApiKey: string,
   text: string,
   sourceLocale: string,
-  targetLocale: string,
-  geminiApiKey?: string,
-  modelName?: string
+  targetLocale: string
 ): Promise<string> {
-  if (geminiApiKey) {
-    const result = await callOwnEngine({
-      lingoApiKey,
-      geminiApiKey,
-      obj: { value: text },
-      sourceLocale,
-      targetLocale,
-      context: "general",
-      modelName,
-    });
-    return result.value || text;
-  }
-
-  const engine = getLingoEngine(lingoApiKey);
+  const engine = getEngine();
   return engine.localizeText(text, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,
@@ -88,58 +49,28 @@ export async function translateText(
  * Translate one string to multiple locales at once.
  */
 export async function batchTranslateText(
-  lingoApiKey: string,
   text: string,
   sourceLocale: string,
-  targetLocales: string[],
-  geminiApiKey?: string,
-  modelName?: string
+  targetLocales: string[]
 ): Promise<Record<string, string>> {
-  const results: Record<string, string> = {};
-
-  await Promise.all(
-    targetLocales.map(async (locale) => {
-      results[locale] = await translateText(
-        lingoApiKey,
-        text,
-        sourceLocale,
-        locale,
-        geminiApiKey,
-        modelName
-      );
-    })
-  );
-
-  return results;
+  const engine = getEngine();
+  return engine.batchLocalizeText(text, {
+    sourceLocale: sourceLocale as any,
+    targetLocales: targetLocales as any[],
+  }) as unknown as Promise<Record<string, string>>;
 }
 
 /**
  * Translate an object of strings — SEO metadata, ARIA labels, etc.
- * Uses our Gemini engine (SEO/ARIA aware + culturally intelligent).
- * Falls back to lingo.dev SDK if no Gemini key.
+ * lingo.dev SDK handles batching + chunking.
+ * Our engine auto-detects context (SEO/ARIA/general) from the data.
  */
 export async function translateObject(
-  lingoApiKey: string,
   obj: Record<string, string>,
   sourceLocale: string,
-  targetLocale: string,
-  geminiApiKey?: string,
-  context: "seo" | "aria" | "general" = "general",
-  modelName?: string
+  targetLocale: string
 ): Promise<Record<string, string>> {
-  if (geminiApiKey) {
-    return callOwnEngine({
-      lingoApiKey,
-      geminiApiKey,
-      obj,
-      sourceLocale,
-      targetLocale,
-      context,
-      modelName,
-    });
-  }
-
-  const engine = getLingoEngine(lingoApiKey);
+  const engine = getEngine();
   return engine.localizeObject(obj, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,
@@ -148,15 +79,15 @@ export async function translateObject(
 
 /**
  * Translate full HTML while preserving all markup.
- * Always uses lingo.dev SDK — localizeHtml is its strongest feature.
+ * lingo.dev SDK parses the DOM, extracts text nodes, calls our engine
+ * for translation, then reassembles the HTML. Best of both worlds.
  */
 export async function translateHtml(
-  lingoApiKey: string,
   html: string,
   sourceLocale: string,
   targetLocale: string
 ): Promise<string> {
-  const engine = getLingoEngine(lingoApiKey);
+  const engine = getEngine();
   return engine.localizeHtml(html, {
     sourceLocale: sourceLocale as any,
     targetLocale: targetLocale as any,

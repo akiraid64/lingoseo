@@ -3,25 +3,17 @@
 import { useState, useEffect } from "react";
 import type { GeminiModel } from "@/types";
 
-export function useGeminiModels(apiKey: string) {
+export function useGeminiModels() {
   const [models, setModels] = useState<GeminiModel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!apiKey || apiKey.length < 10) {
-      setModels([]);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
 
-    fetch("/api/gemini/models", {
-      headers: { "X-Gemini-API-Key": apiKey },
-    })
+    fetch("/api/gemini/models")
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return;
@@ -42,7 +34,7 @@ export function useGeminiModels(apiKey: string) {
     return () => {
       cancelled = true;
     };
-  }, [apiKey]);
+  }, []);
 
   return { models, loading, error };
 }

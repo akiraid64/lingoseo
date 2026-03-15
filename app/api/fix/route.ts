@@ -15,25 +15,19 @@ export async function POST(req: Request) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const geminiApiKey = req.headers.get("x-gemini-api-key");
-  if (!geminiApiKey) {
-    return Response.json(
-      { error: "Missing Gemini API key" },
-      { status: 401 }
-    );
-  }
-
-  const lingoApiKey = req.headers.get("x-lingo-api-key") || process.env.LINGO_API_KEY || "";
+  // All keys are server-side now — no client-side keys needed.
+  const geminiApiKey = process.env.GEMINI_API_KEY || "";
 
   const { repoUrl, modelName, targetLocale, fixModes } = await req.json();
   const targetLocales = targetLocale ? [targetLocale] : [];
-  if (!repoUrl || !modelName) {
+  if (!repoUrl) {
     return Response.json(
-      { error: "Missing repoUrl or modelName" },
+      { error: "Missing repoUrl" },
       { status: 400 }
     );
   }
 
+  const model = modelName || process.env.GEMINI_MODEL || "gemini-2.5-flash";
   const modes = fixModes || { seo: true, aria: true, fullPage: false };
   const modeLabel = [modes.seo && "SEO", modes.aria && "ARIA", modes.fullPage && "FULL-PAGE"].filter(Boolean).join("+");
 
@@ -41,8 +35,8 @@ export async function POST(req: Request) {
   log.info(`Repo:   ${repoUrl}`);
   log.info(`Locale: ${targetLocale || "none"}`);
   log.info(`Modes:  ${modeLabel}`);
-  log.info(`Model:  ${modelName}`);
-  log.info(`Lingo:  ${lingoApiKey ? "✓ key present" : "✗ missing"}`);
+  log.info(`Model:  ${model}`);
+  log.info(`Engine: lingo.dev SDK → /api/process/localize → Gemini`);
 
   let cloneDir: string | null = null;
 
@@ -70,9 +64,8 @@ export async function POST(req: Request) {
       cloneDir,
       issues: analysis.issues,
       geminiApiKey,
-      modelName,
+      modelName: model,
       targetLocales: targetLocales.length > 0 ? targetLocales : analysis.localesDetected,
-      lingoApiKey,
       fixModes: modes,
     });
 
