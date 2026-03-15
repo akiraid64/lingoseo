@@ -619,34 +619,6 @@ export default function DashboardPage() {
                   beforeEx: `<span class="sr-only">\n  Opens in new tab\n</span>`,
                   afterEx: `<span class="sr-only">\n  [translated to ${locale}]\n</span>`,
                 },
-                "missing-html-lang": {
-                  title: "Page Has No Language Declared",
-                  plain: "The lang attribute tells browsers, screen readers, and Google what language the page is in. Without it, nothing knows.",
-                  category: "TECHNICAL", catColor: "#facc15",
-                  beforeEx: `<html>\n  <!-- browser guesses the language -->`,
-                  afterEx: `<html lang="${targetLocale}">`,
-                },
-                "missing-canonical": {
-                  title: "No Canonical URL",
-                  plain: "If your site is accessible at multiple URLs, Google splits your ranking between them. A canonical tag says 'this is the real one'.",
-                  category: "TECHNICAL", catColor: "#facc15",
-                  beforeEx: `<!-- Google sees duplicates →\n     splits ranking -->`,
-                  afterEx: `<link rel="canonical"\n  href="https://site.com/page" />`,
-                },
-                "missing-viewport": {
-                  title: "Mobile View Is Broken",
-                  plain: "Without a viewport meta tag, your site shows desktop layout on mobile. Google ranks mobile-friendly pages higher since 2018.",
-                  category: "TECHNICAL", catColor: "#facc15",
-                  beforeEx: `<!-- mobile: desktop layout at 10% zoom -->`,
-                  afterEx: `<meta name="viewport"\n  content="width=device-width,\n  initial-scale=1" />`,
-                },
-                "invalid-schema": {
-                  title: "Structured Data Deprecated",
-                  plain: "Schema markup helps Google show rich results (star ratings, prices, FAQs). Outdated types mean Google ignores your structured data.",
-                  category: "TECHNICAL", catColor: "#facc15",
-                  beforeEx: `{ "@type": "FAQPage" }\n// deprecated`,
-                  afterEx: `{ "@type": "WebPage" }\n// supported type`,
-                },
                 "missing-jsonld-localization": {
                   title: "Structured Data Not Translated",
                   plain: "JSON-LD helps Google understand your content for rich snippets. If only in English, rich results only appear for English searches.",
@@ -656,19 +628,26 @@ export default function DashboardPage() {
                 },
               };
 
-              // Determine which categories to show based on selected modes
+              // Only show issues that the fixer will TRANSLATE — no technical faults
               const showSeo = fixModes.seo || fixModes.fullPage;
               const showAria = fixModes.aria || fixModes.fullPage;
 
+              // Only include issues that have a known ISSUE_META entry (SEO or ARIA)
+              const relevantIssues = analysis.issues.filter(i => {
+                const meta = ISSUE_META[i.type];
+                if (!meta) return false; // skip unknown/technical issues
+                if (meta.category === "SEO" && !showSeo) return false;
+                if (meta.category === "ARIA" && !showAria) return false;
+                return true;
+              });
+
               const grouped: Record<string, typeof analysis.issues> = {};
               if (showSeo) {
-                grouped.SEO = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "SEO");
+                grouped.SEO = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "SEO");
               }
               if (showAria) {
-                grouped.ARIA = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "ARIA");
+                grouped.ARIA = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "ARIA");
               }
-              // Technical always shown
-              grouped.TECHNICAL = analysis.issues.filter(i => ISSUE_META[i.type]?.category === "TECHNICAL" || !ISSUE_META[i.type]);
 
               // Deduplicate: only show one issue per type+filePath combo
               for (const cat of Object.keys(grouped)) {
@@ -682,9 +661,8 @@ export default function DashboardPage() {
               }
 
               const catConfig: Record<string, { color: string; label: string; desc: string }> = {
-                SEO: { color: "var(--accent)", label: "SEO", desc: "Titles, descriptions, headings, alt text, hreflang, OG tags" },
-                ARIA: { color: "#60a5fa", label: "ARIA", desc: "aria-label attributes, .sr-only screen reader text" },
-                TECHNICAL: { color: "#facc15", label: "TECHNICAL", desc: "html lang, canonical, viewport, schema" },
+                SEO: { color: "var(--accent)", label: "SEO TRANSLATIONS", desc: "Titles, descriptions, headings, alt text, OG tags → translated to " + locale },
+                ARIA: { color: "#60a5fa", label: "ARIA TRANSLATIONS", desc: "aria-label attributes, .sr-only text → translated to " + locale },
               };
 
               return (Object.entries(grouped) as [string, typeof analysis.issues][]).map(([cat, issues]) => {
@@ -830,7 +808,7 @@ export default function DashboardPage() {
               >
                 {fixing
                   ? "[ LINGO.DEV TRANSLATING → GEMINI OPTIMIZING → PUSHING... ]"
-                  : `[ FIX ALL & CREATE PR — ${analysis.issues.length} ISSUES ]`}
+                  : `[ TRANSLATE & CREATE PR ]`}
               </button>
               {!canFix && (
                 <span style={{ fontSize: "10px", color: "var(--fg-muted)", letterSpacing: "0.05em" }}>

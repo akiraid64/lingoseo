@@ -453,6 +453,11 @@ export function runAllScanners(
   filePath: string,
   html: string
 ): SeoIssue[] {
+  // Skip non-HTML files (sitemap.xml, robots.txt, etc.)
+  if (filePath.endsWith(".xml") || filePath.endsWith(".txt")) {
+    return [];
+  }
+
   const $ = cheerio.load(html);
 
   return [
