@@ -337,15 +337,19 @@ export default function DashboardPage() {
                 },
               ].map(({ key, label, sub, desc }) => {
                 const active = fixModes[key];
-                const disabled = key === "aria" && fixModes.fullPage;
+                const disabled = (key === "aria" && fixModes.fullPage) || (key === "seo" && fixModes.fullPage);
                 return (
                   <button
                     key={key}
                     disabled={disabled}
                     onClick={() => setFixModes((p) => {
                       const next = { ...p, [key]: !p[key] };
-                      // Full Page already includes ARIA via localizeHtml
-                      if (key === "fullPage" && next.fullPage) next.aria = false;
+                      if (key === "fullPage" && next.fullPage) {
+                        // Full Page covers ARIA (localizeHtml translates aria-labels)
+                        // and requires SEO (hreflang/canonical/og tags still need inserting)
+                        next.aria = false;
+                        next.seo = true;
+                      }
                       return next;
                     })}
                     style={{
@@ -368,7 +372,7 @@ export default function DashboardPage() {
                       {sub}
                     </div>
                     <div style={{ fontSize: "9px", opacity: 0.55, lineHeight: 1.4 }}>
-                      {disabled ? "INCLUDED IN FULL PAGE" : desc}
+                      {key === "aria" && fixModes.fullPage ? "INCLUDED IN FULL PAGE" : key === "seo" && fixModes.fullPage ? "AUTO-ENABLED BY FULL PAGE" : desc}
                     </div>
                   </button>
                 );
