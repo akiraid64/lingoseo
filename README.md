@@ -12,13 +12,13 @@
 
 ## The Problem
 
-Your website ranks #1 in English. In Spanish, Japanese, or Arabic — it's invisible to search engines, broken for blind users, and culturally off for the market you're trying to reach.
+Your website ranks #1 in English. In Spanish, Japanese, or Arabic — **it's invisible to search engines, broken for blind users, and culturally off for the market you're trying to reach.**
 
 Most developers ship apps with stuff like this still in the code:
 
-- `<title>My Next.js App</title>` — that placeholder is what Google indexes as your brand name
-- No `hreflang` tags *(the tags that tell Google "show this page to Spanish speakers, not the English version")* — so Google serves your Mexican users the English page
-- `aria-label="Submit form"` *(aria-labels are the hidden text that screen readers read aloud to blind users)* — a blind Japanese user hears English in the middle of a Japanese screen reader session
+- `<title>My Next.js App</title>` — **that placeholder is what Google indexes as your brand name**
+- No `hreflang` tags *(the tags that tell Google "show this page to Spanish speakers, not the English version")* — so **Google serves your Mexican users the English page**
+- `aria-label="Submit form"` *(aria-labels are the hidden text that screen readers read aloud to blind users)* — **a blind Japanese user hears English in the middle of a Japanese screen reader session**
 - Meta descriptions in English on a page that's supposed to be in Korean
 - JSON-LD *(hidden structured data that tells search engines what your page is about)* set to the wrong language
 
@@ -26,17 +26,19 @@ That's just the broken tags. Even when developers *do* translate, they translate
 
 **What literally-translated websites look like for blind users:**
 
-A screen reader navigating a Japanese page hits `aria-label="Close dialog"` and reads it out in English, mid-sentence. The rest of the page is Japanese. The button label isn't. That's not a minor glitch — it's the equivalent of a foreign-language pop-up appearing in the middle of an audiobook.
+A screen reader navigating a Japanese page hits `aria-label="Close dialog"` and reads it out in English, mid-sentence. The rest of the page is Japanese. The button label isn't. That's not a minor glitch — **it's the equivalent of a foreign-language pop-up appearing in the middle of an audiobook.**
 
 There's also hidden text called `sr-only` *(short for "screen reader only" — text that's invisible on screen but read aloud)* that developers often forget to translate. So blind Arabic users hear English labels for buttons their sighted counterparts would never notice.
 
 And emoji. Decorative emoji left without `aria-hidden="true"` get spelled out by screen readers: a Korean page says "저희 서비스를 SPARKLES 이용해 보세요" — "SPARKLES" pronounced in English, mid-sentence.
 
-**253 million people worldwide are visually impaired.** Every untranslated accessibility label locks them out of your page in their own language.
+> **253 million people worldwide are visually impaired.** Every untranslated accessibility label locks them out of your page in their own language.
 
 **What literally-translated websites look like for real users:**
 
-A Mexican SaaS page that sounds like it was written in Madrid. A Japanese pricing page that's too blunt (Japanese copy is softer). A German CTA that says "Discover More" when the actual high-volume German search term is "Jetzt entdecken." Translation is not localization. What ranks in São Paulo is not what ranks in Lisbon.
+A Mexican SaaS page that sounds like it was written in Madrid. A Japanese pricing page that's too blunt (Japanese copy is softer). A German CTA that says "Discover More" when **the actual high-volume German search term is "Jetzt entdecken."**
+
+> **Translation is not localization.** What ranks in São Paulo is not what ranks in Lisbon.
 
 LingoSEO uses Gemini to pull real search trends per locale — so titles and descriptions target what people in that market actually type into Google, not just English copy run through a translator. Every accessibility label gets its own prompt: written for ears, not eyes. Formal where formal is expected. Warm where warm is expected.
 
@@ -46,7 +48,7 @@ LingoSEO uses Gemini to pull real search trends per locale — so titles and des
 
 ## The Solution
 
-LingoSEO connects to your GitHub repo, runs a 13-point scan on every HTML/JSX/TSX file, then uses the **lingo.dev SDK** + **Google Gemini** to fix everything — and opens a pull request. You review the diff and merge.
+LingoSEO connects to your GitHub repo, runs a **13-point scan** on every HTML/JSX/TSX file, then uses the **lingo.dev SDK** + **Google Gemini** to fix everything — and opens a pull request. **You review the diff and merge.**
 
 ![LingoSEO Pipeline — Extract, Translate with lingo.dev SDK, Replace](./public/pipeline.png)
 
@@ -56,7 +58,7 @@ LingoSEO connects to your GitHub repo, runs a 13-point scan on every HTML/JSX/TS
 
 ### The three-step pipeline
 
-Most localization tools use pattern matching *(regex — think "find all text that looks like a page title")* to extract strings from files. It misses about 35% of translatable content. Nav links, pricing badges, footer text, screen-reader labels — all invisible to it.
+Most localization tools use pattern matching *(regex — think "find all text that looks like a page title")* to extract strings from files. **It misses about 35% of translatable content.** Nav links, pricing badges, footer text, screen-reader labels — all invisible to it.
 
 LingoSEO doesn't use pattern matching for this. Instead:
 
@@ -68,9 +70,9 @@ LingoSEO doesn't use pattern matching for this. Instead:
 
 ### Why lingo.dev SDK sits in the middle
 
-The lingo.dev SDK has a feature called `apiUrl`. Point it at your own server and every translation call goes through your endpoint instead of theirs.
+The lingo.dev SDK has a feature called `apiUrl`. **Point it at your own server and every translation call goes through your endpoint instead of theirs.**
 
-That's how LingoSEO works. The SDK handles the hard infrastructure stuff — parsing HTML without breaking it, splitting large translation jobs into safe batches, validating locale codes. I handle what generic translation can't: context.
+That's how LingoSEO works. The SDK handles the hard infrastructure stuff — parsing HTML without breaking it, splitting large translation jobs into safe batches, validating locale codes. I handle what generic translation can't: **context.**
 
 ```
 standard lingo.dev:  strings → lingo.dev engine → translated strings
@@ -95,7 +97,7 @@ LingoSEO:            strings → lingo.dev SDK → /api/process/localize → Gem
                                translation, a native one"
 ```
 
-**lingo.dev SDK owns the transport. I own the context.**
+> **lingo.dev SDK owns the transport. I own the context.**
 
 ### What happens inside the translation endpoint
 
@@ -193,11 +195,11 @@ Deductions: Critical issues cost 15 points, warnings cost 8, info items cost 2.
 
 ## A Few Smart Details
 
-**Brand protection.** LingoSEO reads your `package.json` to find your real brand name — that's the one file that never gets translated. If a previous run corrupted "InvoiceFlow" to "FacturaFlujo" in Spanish, it catches it and reverts it.
+**🔒 Brand protection.** LingoSEO reads your `package.json` to find your real brand name — that's the one file that never gets translated. If a previous run corrupted "InvoiceFlow" to "FacturaFlujo" in Spanish, **it catches it and reverts it.**
 
-**Mixed-language cleanup.** Run translation tools a few times in a row and files end up with 3-5 languages mixed in. LingoSEO detects each string's language individually and only translates the ones that don't already match the target.
+**🧹 Mixed-language cleanup.** Run translation tools a few times in a row and files end up with 3-5 languages mixed in. LingoSEO detects each string's language individually and **only translates the ones that don't already match the target.**
 
-**It doesn't trust `<html lang>`** — that attribute is often stale or wrong. Gemini reads the actual text content to figure out what language the page really is.
+**🔍 It doesn't trust `<html lang>`** — that attribute is often stale or wrong. Gemini reads the actual text content to figure out what language the page really is.
 
 ---
 
@@ -255,7 +257,7 @@ Arabic, Chinese (Simplified), Chinese (Traditional), Dutch, French, French (Cana
 
 [lingo.dev](https://lingo.dev) (YC F24) built an SDK that separates translation infrastructure from translation intelligence. Their `apiUrl` feature lets you swap in your own endpoint — you keep all the SDK's plumbing (HTML parsing, batching, locale validation) and bring your own brain.
 
-LingoSEO is what happens when that brain knows the difference between a search engine, a screen reader, and a human — and writes differently for each one.
+LingoSEO is what happens when that brain knows the difference between a search engine, a screen reader, and a human — **and writes differently for each one.**
 
 ---
 
