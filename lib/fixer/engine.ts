@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "fs/promises";
 import { join, extname, relative } from "path";
 import * as cheerio from "cheerio";
 import type { SeoIssue, FixResult } from "@/types";
@@ -151,6 +151,48 @@ TEXT:
   return "en";
 }
 
+// ── File discovery ────────────────────────────────────────────────────────
+// Walk the cloned repo and find all files that could contain translatable content.
+// This ensures layout.tsx, page.tsx, and other content files are ALWAYS processed,
+// not just files that happen to have scanner-detected issues.
+
+const TRANSLATABLE_EXT = new Set([
+  ".html", ".htm", ".php", ".ejs", ".astro", ".vue", ".svelte",
+  ".tsx", ".jsx",
+]);
+const SKIP_DIRS = new Set([
+  "node_modules", ".git", ".next", "dist", "build", ".vercel", ".lingo",
+  "__tests__", "test", "tests", ".turbo", "coverage",
+]);
+
+async function discoverTranslatableFiles(cloneDir: string): Promise<Set<string>> {
+  const files = new Set<string>();
+
+  async function walk(dir: string) {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch { return; }
+
+    for (const entry of entries) {
+      if (SKIP_DIRS.has(entry.name)) continue;
+      const fullPath = join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        await walk(fullPath);
+      } else {
+        const ext = extname(entry.name).toLowerCase();
+        if (TRANSLATABLE_EXT.has(ext)) {
+          files.add(relative(cloneDir, fullPath));
+        }
+      }
+    }
+  }
+
+  await walk(cloneDir);
+  return files;
+}
+
 export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
   const { cloneDir, issues, targetLocales, fixModes } = params;
 
@@ -182,10 +224,18 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
   const brand = await extractBrandContext(cloneDir);
   globalLog.push(`[BRAND] App name: "${brand.appName}" | Brand names: ${brand.brandNames.join(", ") || "none"}`);
 
-  // Collect all unique files that have issues
+  // ── Step 0c: Discover ALL translatable files in the project ──────────
+  // Don't just process files with issues — scan every HTML/TSX/JSX file
+  // so that layout.tsx metadata, JSON-LD, OG tags, etc. always get translated
+  const allFiles = await discoverTranslatableFiles(cloneDir);
+  // Also include issue files that might not match the extension list
   const issueFiles = new Set(issues.map(i => i.filePath));
+  for (const f of issueFiles) {
+    if (f !== "sitemap.xml") allFiles.add(f);
+  }
+  globalLog.push(`[FIXER] Found ${allFiles.size} translatable files`);
 
-  for (const filePath of issueFiles) {
+  for (const filePath of allFiles) {
     if (filePath === "sitemap.xml") continue;
 
     const fullPath = join(cloneDir, filePath);
@@ -627,43 +677,68 @@ function isCodeNotText(text: string): boolean {
 async function translateTsxSeo(content: string, sourceLang: string, locale: string, brand: BrandContext): Promise<string> {
   const strings: Record<string, string> = {};
 
-  // Metadata strings — only if they exist and aren't placeholders
-  const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
-  if (titleMatch && !isGenericPlaceholder(titleMatch[1])) {
-    strings["title"] = titleMatch[1];
-  }
-  const descMatch = content.match(/description:\s*["']([^"']+)["']/);
-  if (descMatch && !isGenericPlaceholder(descMatch[1])) {
-    strings["description"] = descMatch[1];
+  // ── 1. Extract ALL string values from metadata export block ──────────
+  // This catches title, description, OG, Twitter, keywords — everything
+  // in one pass instead of fragile per-field regex
+  const metadataStrings = extractMetadataStrings(content);
+  for (const [key, val] of Object.entries(metadataStrings)) {
+    // For placeholders, replace with brand name instead of skipping
+    if (isGenericPlaceholder(val)) {
+      if (key.includes("title") && brand.appName) {
+        strings[key] = brand.appName;
+      }
+      // Skip placeholder descriptions entirely — Gemini will generate from brand
+      continue;
+    }
+    strings[key] = val;
   }
 
-  // OG / Twitter metadata in TSX — use [\s\S] instead of /s flag for dotAll
-  const ogTitleMatch = content.match(/openGraph:\s*\{[\s\S]*?title:\s*["']([^"']+)["']/);
-  if (ogTitleMatch) strings["og_title"] = ogTitleMatch[1];
-  const ogDescMatch = content.match(/openGraph:\s*\{[\s\S]*?description:\s*["']([^"']+)["']/);
-  if (ogDescMatch) strings["og_description"] = ogDescMatch[1];
-  const twitterTitleMatch = content.match(/twitter:\s*\{[\s\S]*?title:\s*["']([^"']+)["']/);
-  if (twitterTitleMatch) strings["twitter_title"] = twitterTitleMatch[1];
-  const twitterDescMatch = content.match(/twitter:\s*\{[\s\S]*?description:\s*["']([^"']+)["']/);
-  if (twitterDescMatch) strings["twitter_description"] = twitterDescMatch[1];
+  // ── 2. JSON-LD / structured data ─────────────────────────────────────
+  const jsonLdMatches = [...content.matchAll(/JSON\.stringify\(\s*(\{[\s\S]*?\})\s*\)/g)];
+  for (let i = 0; i < jsonLdMatches.length; i++) {
+    try {
+      // Extract string values from JSON-LD-like objects
+      const objStr = jsonLdMatches[i][1];
+      const strValues = [...objStr.matchAll(/:\s*["']([^"']{3,200})["']/g)];
+      for (let j = 0; j < strValues.length; j++) {
+        const val = strValues[j][1].trim();
+        if (val && !val.startsWith("http") && !val.startsWith("@") && !val.includes("schema.org")) {
+          strings[`jsonld_${i}_${j}`] = val;
+        }
+      }
+    } catch {}
+  }
+  // Also check for inline ld+json strings assigned to variables
+  const ldJsonVarMatches = [...content.matchAll(/ld\+json[\s\S]*?(\{[\s\S]*?\})\s*(?:<\/script>|`)/g)];
+  for (let i = 0; i < ldJsonVarMatches.length; i++) {
+    try {
+      const strValues = [...ldJsonVarMatches[i][1].matchAll(/:\s*["']([^"']{3,200})["']/g)];
+      for (let j = 0; j < strValues.length; j++) {
+        const val = strValues[j][1].trim();
+        if (val && !val.startsWith("http") && !val.startsWith("@") && !val.includes("schema.org") && !/^[a-z]{2}(-[A-Z]{2})?$/.test(val)) {
+          strings[`ld_${i}_${j}`] = val;
+        }
+      }
+    } catch {}
+  }
 
-  // Headings in JSX — but NOT inside SVG blocks
+  // ── 3. Headings in JSX — NOT inside SVG ──────────────────────────────
   const contentNoSvg = content.replace(SVG_BLOCK_RE, (m) => " ".repeat(m.length));
-  const headingMatches = [...contentNoSvg.matchAll(/<h[1-3][^>]*>([^<{]{2,200})<\/h[1-3]>/g)];
+  const headingMatches = [...contentNoSvg.matchAll(/<h[1-6][^>]*>([^<{]{2,200})<\/h[1-6]>/g)];
   headingMatches.forEach((m, i) => {
     const text = m[1].trim();
     if (text && !isCodeNotText(text)) strings[`h_${i}`] = text;
   });
 
-  // Alt text
+  // ── 4. Alt text ──────────────────────────────────────────────────────
   const altMatches = [...content.matchAll(/alt=["']([^"']{2,})["']/g)];
   altMatches.forEach((m, i) => { strings[`alt_${i}`] = m[1]; });
 
-  // Visible text between JSX tags: >Some text< — catches nav links, buttons, badges
-  const textMatches = [...contentNoSvg.matchAll(/>([^<>{]{3,300})/g)];
+  // ── 5. ALL visible text >text< — nav, buttons, badges, footer ────────
+  const textMatches = [...contentNoSvg.matchAll(/>([^<>{]{2,300})/g)];
   textMatches.forEach((m, i) => {
     const text = m[1].trim();
-    if (text && !isCodeNotText(text) && !isGenericPlaceholder(text)) {
+    if (text && !isCodeNotText(text) && !isGenericPlaceholder(text) && text.length >= 2) {
       strings[`txt_${i}`] = text;
     }
   });
@@ -678,75 +753,135 @@ async function translateTsxSeo(content: string, sourceLang: string, locale: stri
   const translated = await translateObject(strings, sourceLang, locale);
   let result = content;
 
-  // ── Position-safe replacement using unique markers ──
-  // Build a map of original → translated for all string matches,
-  // then do a single pass replacement to avoid first-match-only bugs
-
-  // Metadata replacements
-  if (translated["title"] && titleMatch && !isGenericPlaceholder(titleMatch[1])) {
-    result = result.replace(titleMatch[0], titleMatch[0].replace(titleMatch[1], translated["title"]));
-  }
-  if (translated["description"] && descMatch && !isGenericPlaceholder(descMatch[1])) {
-    result = result.replace(descMatch[0], descMatch[0].replace(descMatch[1], translated["description"]));
-  }
-  if (translated["og_title"] && ogTitleMatch) {
-    result = result.replace(ogTitleMatch[0], ogTitleMatch[0].replace(ogTitleMatch[1], translated["og_title"]));
-  }
-  if (translated["og_description"] && ogDescMatch) {
-    result = result.replace(ogDescMatch[0], ogDescMatch[0].replace(ogDescMatch[1], translated["og_description"]));
-  }
-  if (translated["twitter_title"] && twitterTitleMatch) {
-    result = result.replace(twitterTitleMatch[0], twitterTitleMatch[0].replace(twitterTitleMatch[1], translated["twitter_title"]));
-  }
-  if (translated["twitter_description"] && twitterDescMatch) {
-    result = result.replace(twitterDescMatch[0], twitterDescMatch[0].replace(twitterDescMatch[1], translated["twitter_description"]));
+  // ── Replace metadata strings ──────────────────────────────────────────
+  for (const [key, originalVal] of Object.entries(metadataStrings)) {
+    const translatedVal = translated[key];
+    if (!translatedVal) continue;
+    // For placeholders that were replaced with brand name, the original is the placeholder
+    const searchVal = isGenericPlaceholder(originalVal) ? originalVal : originalVal;
+    // Escape regex special chars in the search value
+    const escaped = searchVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(["'])${escaped}\\1`);
+    const match = result.match(regex);
+    if (match) {
+      result = result.replace(match[0], `${match[1]}${translatedVal}${match[1]}`);
+    }
   }
 
-  // Replace headings — reverse order for position safety
+  // ── Replace JSON-LD strings ───────────────────────────────────────────
+  for (const [key, originalVal] of Object.entries(strings)) {
+    if (!key.startsWith("jsonld_") && !key.startsWith("ld_")) continue;
+    if (!translated[key]) continue;
+    const escaped = originalVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(`(["'])${escaped}\\1`);
+    const match = result.match(regex);
+    if (match) {
+      result = result.replace(match[0], `${match[1]}${translated[key]}${match[1]}`);
+    }
+  }
+
+  // ── Replace headings (reverse order for position safety) ──────────────
   for (let i = headingMatches.length - 1; i >= 0; i--) {
     if (translated[`h_${i}`]) {
       const m = headingMatches[i];
-      const original = m[0];
-      const replaced = original.replace(m[1], translated[`h_${i}`]);
-      result = result.replace(original, replaced);
+      result = result.replace(m[0], m[0].replace(m[1], translated[`h_${i}`]));
     }
   }
 
-  // Replace alt text
+  // ── Replace alt text ──────────────────────────────────────────────────
   for (let i = altMatches.length - 1; i >= 0; i--) {
     if (translated[`alt_${i}`]) {
-      const m = altMatches[i];
-      result = result.replace(m[0], m[0].replace(m[1], translated[`alt_${i}`]));
+      result = result.replace(altMatches[i][0], altMatches[i][0].replace(altMatches[i][1], translated[`alt_${i}`]));
     }
   }
 
-  // Replace visible text — use indexed positions to avoid duplicate-match bugs
-  // Track which offsets have been replaced to avoid double-replacing
-  const replaced = new Set<number>();
+  // ── Replace visible text — offset-indexed to handle duplicates ────────
+  const replacedOffsets = new Set<number>();
   for (let i = textMatches.length - 1; i >= 0; i--) {
     const key = `txt_${i}`;
-    if (translated[key] && strings[key]) {
-      const m = textMatches[i];
-      const offset = m.index!;
-      if (replaced.has(offset)) continue;
-      replaced.add(offset);
-      const originalSnippet = `>${m[1]}`;
-      const idx = content.indexOf(originalSnippet, offset > 10 ? offset - 10 : 0);
-      if (idx >= 0) {
-        const before = result.slice(0, idx);
-        const after = result.slice(idx + originalSnippet.length);
-        result = before + `>${m[1].replace(m[1].trim(), translated[key])}` + after;
-      }
+    if (!translated[key] || !strings[key]) continue;
+    const m = textMatches[i];
+    const offset = m.index!;
+    if (replacedOffsets.has(offset)) continue;
+    replacedOffsets.add(offset);
+    const originalSnippet = `>${m[1]}`;
+    const idx = content.indexOf(originalSnippet, offset > 10 ? offset - 10 : 0);
+    if (idx >= 0) {
+      const before = result.slice(0, idx);
+      const after = result.slice(idx + originalSnippet.length);
+      result = before + `>${m[1].replace(m[1].trim(), translated[key])}` + after;
     }
   }
 
-  // Update html lang in TSX layout files
+  // ── Update html lang ──────────────────────────────────────────────────
   result = result.replace(/<html([^>]*)\slang=["'][^"']*["']/, `<html$1 lang="${locale}"`);
 
-  // Update og:locale in metadata
+  // ── Update og:locale and inLanguage in JSON-LD ────────────────────────
   result = result.replace(/(locale:\s*["'])[^"']*(["'])/, `$1${locale.replace("-", "_")}$2`);
+  result = result.replace(/(inLanguage["']:\s*["'])[^"']*(["'])/, `$1${locale}$2`);
+
+  // ── Update hreflang references ────────────────────────────────────────
+  // Replace old locale references in hreflang with target locale
+  result = result.replace(/(hreflang=["'])[^"']*(["'])/g, (match, pre, post) => {
+    // Keep x-default as-is
+    if (match.includes("x-default")) return match;
+    return `${pre}${locale}${post}`;
+  });
+  // Update locale path segments (e.g., "/es" → "/zh-Hant")
+  result = result.replace(/(href=["'][^"']*\/)([a-z]{2}(?:-[A-Za-z]+)?)(\/[^"']*["'])/g, (match, pre, oldLocale, post) => {
+    // Only replace if it looks like a locale path segment
+    if (/^[a-z]{2}(-[A-Za-z]{2,})?$/.test(oldLocale) && oldLocale !== "en") {
+      return `${pre}${locale}${post}`;
+    }
+    return match;
+  });
+
+  // ── Clean stale data-aria-* ───────────────────────────────────────────
+  result = result.replace(/\s+data-aria-[a-z]{2,5}=["'][^"']*["']/g, "");
 
   return result;
+}
+
+// Extract ALL string values from a Next.js/TSX metadata export block.
+// Handles: title, description, openGraph.title, openGraph.description,
+// twitter.title, twitter.description, keywords, etc.
+function extractMetadataStrings(content: string): Record<string, string> {
+  const strings: Record<string, string> = {};
+
+  // Find the metadata export block: export const metadata = { ... }
+  // Use bracket counting to find the end of the object
+  const metaStart = content.match(/export\s+const\s+metadata[\s:][^=]*=\s*\{/);
+  if (!metaStart || metaStart.index === undefined) return strings;
+
+  let depth = 0;
+  let blockStart = metaStart.index + metaStart[0].length - 1; // at the opening {
+  let blockEnd = blockStart;
+  for (let i = blockStart; i < content.length; i++) {
+    if (content[i] === "{") depth++;
+    if (content[i] === "}") depth--;
+    if (depth === 0) { blockEnd = i + 1; break; }
+  }
+
+  const metaBlock = content.slice(blockStart, blockEnd);
+
+  // Extract all string values with their key path
+  // Simple approach: find all key: "value" pairs
+  const pairs = [...metaBlock.matchAll(/(\w+):\s*["']([^"']+)["']/g)];
+  for (const pair of pairs) {
+    const key = pair[1];
+    const val = pair[2];
+
+    // Skip non-translatable keys
+    if (["type", "card", "site", "creator", "url", "width", "height",
+         "siteName", "locale", "lang", "charset", "viewport", "themeColor",
+         "manifest", "icon", "apple", "canonical"].includes(key)) continue;
+    // Skip URLs and locale codes
+    if (val.startsWith("http") || val.startsWith("/") || /^[a-z]{2}[_-][A-Z]{2}$/.test(val)) continue;
+
+    strings[`meta_${key}`] = val;
+  }
+
+  return strings;
 }
 
 async function translateTsxAria(content: string, sourceLang: string, locale: string): Promise<string> {

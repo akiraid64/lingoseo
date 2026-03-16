@@ -33,7 +33,8 @@ export async function POST(req: Request) {
 
   log.divider("FIX REQUEST");
   log.info(`Repo:   ${repoUrl}`);
-  log.info(`Locale: ${targetLocale || "none"}`);
+  log.info(`Target: ${targetLocale || "none"}`);
+  log.info(`Source: auto-detect (from html lang / Gemini)`);
   log.info(`Modes:  ${modeLabel}`);
   log.info(`Model:  ${model}`);
   log.info(`Engine: lingo.dev SDK → /api/process/localize → Gemini`);
