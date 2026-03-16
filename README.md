@@ -7,7 +7,8 @@
 [![Built with lingo.dev SDK](https://img.shields.io/badge/built%20with-lingo.dev%20SDK-blue)](https://lingo.dev)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![Gemini 2.5](https://img.shields.io/badge/Gemini-2.5%20Flash-yellow)](https://ai.google.dev)
-[![Demo Video](https://img.shields.io/badge/Demo-Watch%20on%20YouTube-red)](https://youtu.be/RpGkRHbR7Hg)
+
+### [▶ Watch the Demo](https://youtu.be/RpGkRHbR7Hg)
 
 ---
 
@@ -46,8 +47,6 @@ A Mexican SaaS page that sounds like it was written in Madrid. A Japanese pricin
 LingoSEO uses Gemini to pull real search trends per locale — so titles and descriptions target what people in that market actually type into Google, not just English copy run through a translator. Every accessibility label gets its own prompt: written for ears, not eyes. Formal where formal is expected. Warm where warm is expected.
 
 **Every untranslated meta tag is a ranking you're losing. Every untranslated aria-label is a blind user you're excluding.** Nobody audits this stuff across 20+ languages manually. So the bugs ship.
-
-[![Watch the demo](https://img.youtube.com/vi/RpGkRHbR7Hg/maxresdefault.jpg)](https://youtu.be/RpGkRHbR7Hg)
 
 > This is what LingoSEO fixes. One scan. Every language. Every file. You just merge the PR.
 
