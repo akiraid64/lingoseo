@@ -84,19 +84,18 @@ That's how LingoSEO works. The SDK handles the hard infrastructure stuff — par
 
 ```mermaid
 flowchart TD
-    subgraph std["Standard lingo.dev"]
-        A["Strings"] --> B["lingo.dev engine"] --> C["Translated strings"]
-    end
+    IN["📄 Your file\n— titles, aria-labels, headings,\ndescriptions, buttons, alt text —"]
+    IN --> SDK["🔧 lingo.dev SDK\napiUrl points to LingoSEO's own server\n— handles batching, HTML parsing, locale validation —"]
+    SDK --> LOC["/api/process/localize\nLingoSEO's translation endpoint"]
+    LOC --> GEM["✨ Gemini"]
 
-    subgraph lseo["LingoSEO"]
-        D["Strings"] --> E["lingo.dev SDK\n— own apiUrl —"] --> F["/api/process/localize"] --> G["Gemini"]
-        G --> SEO["SEO context\nTarget real search terms\n50–60 char titles · 150–160 char descriptions"]
-        G --> ARIA["ARIA context\nNatural spoken language\nfor blind users in that locale"]
-        G --> GEN["Cultural context\nRight tone, formality & vocabulary\nfor the target locale"]
-        SEO --> OUT["Translated strings"]
-        ARIA --> OUT
-        GEN --> OUT
-    end
+    GEM --> SEO["🔍 SEO strings\nTranslated to what people\nactually search for in that locale\n50–60 char titles · 150–160 char descriptions"]
+    GEM --> ARIA["♿ ARIA strings\nWritten as natural spoken language\na blind user expects to hear\nnot a word-for-word translation"]
+    GEM --> GEN["🌍 General content\nCultural adaptation —\nright tone, formality & vocabulary\nfor the locale, not a literal translation"]
+
+    SEO --> OUT["✅ Translated file\n100% in target locale\nbrand names preserved\nmixed-language cleaned up"]
+    ARIA --> OUT
+    GEN --> OUT
 ```
 
 > **lingo.dev SDK owns the transport. I own the context.**
