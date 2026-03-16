@@ -7,6 +7,7 @@
 [![Built with lingo.dev SDK](https://img.shields.io/badge/built%20with-lingo.dev%20SDK-blue)](https://lingo.dev)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![Gemini 2.5](https://img.shields.io/badge/Gemini-2.5%20Flash-yellow)](https://ai.google.dev)
+[![Demo Video](https://img.shields.io/badge/Demo-Watch%20on%20YouTube-red)](https://youtu.be/RpGkRHbR7Hg)
 
 ---
 
@@ -46,9 +47,7 @@ LingoSEO uses Gemini to pull real search trends per locale — so titles and des
 
 **Every untranslated meta tag is a ranking you're losing. Every untranslated aria-label is a blind user you're excluding.** Nobody audits this stuff across 20+ languages manually. So the bugs ship.
 
-<video src="./public/demo_compressed.mp4" controls width="100%">
-  Your browser does not support the video tag.
-</video>
+[![Watch the demo](https://img.youtube.com/vi/RpGkRHbR7Hg/maxresdefault.jpg)](https://youtu.be/RpGkRHbR7Hg)
 
 > This is what LingoSEO fixes. One scan. Every language. Every file. You just merge the PR.
 
