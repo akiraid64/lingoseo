@@ -14,6 +14,8 @@
 
 Your website ranks #1 in English. In Spanish, Japanese, or Arabic — **it's invisible to search engines, broken for blind users, and culturally off for the market you're trying to reach.**
 
+![What happens when you ship without LingoSEO](./public/Gemini_Generated_Image_4wgp0n4wgp0n4wgp.png)
+
 Most developers ship apps with stuff like this still in the code:
 
 - `<title>My Next.js App</title>` — **that placeholder is what Google indexes as your brand name**
