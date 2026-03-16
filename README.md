@@ -8,7 +8,7 @@
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
 [![Gemini 2.5](https://img.shields.io/badge/Gemini-2.5%20Flash-yellow)](https://ai.google.dev)
 
-### [▶ Watch the Demo](https://youtu.be/RpGkRHbR7Hg)
+## [▶ Watch the Demo on YouTube](https://youtu.be/RpGkRHbR7Hg)
 
 ---
 
