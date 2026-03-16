@@ -46,7 +46,7 @@ LingoSEO uses Gemini to pull real search trends per locale — so titles and des
 
 **Every untranslated meta tag is a ranking you're losing. Every untranslated aria-label is a blind user you're excluding.** Nobody audits this stuff across 20+ languages manually. So the bugs ship.
 
-<video src="./public/demo.mp4" controls width="100%">
+<video src="./public/demo_compressed.mp4" controls width="100%">
   Your browser does not support the video tag.
 </video>
 
@@ -82,27 +82,21 @@ The lingo.dev SDK has a feature called `apiUrl`. **Point it at your own server a
 
 That's how LingoSEO works. The SDK handles the hard infrastructure stuff — parsing HTML without breaking it, splitting large translation jobs into safe batches, validating locale codes. I handle what generic translation can't: **context.**
 
-```
-standard lingo.dev:  strings → lingo.dev engine → translated strings
+```mermaid
+flowchart TD
+    subgraph std["Standard lingo.dev"]
+        A["Strings"] --> B["lingo.dev engine"] --> C["Translated strings"]
+    end
 
-LingoSEO:            strings → lingo.dev SDK → /api/process/localize → Gemini
-                                                        │
-                          ┌─────────────────────────────┤
-                          │                             │
-                          ▼                             ▼
-                   SEO strings:               ARIA strings:
-                   "translate to keywords     "write as natural
-                    people actually search     spoken language a
-                    for — not dictionary       blind {locale} user
-                    English mapped to {locale}"expects to hear"
-                          │                             │
-                          └──────────────┬──────────────┘
-                                         ▼
-                              Cultural adaptation:
-                              "you decide the right tone,
-                               formality, and vocabulary
-                               for {locale} — not a literal
-                               translation, a native one"
+    subgraph lseo["LingoSEO"]
+        D["Strings"] --> E["lingo.dev SDK\n— own apiUrl —"] --> F["/api/process/localize"] --> G["Gemini"]
+        G --> SEO["SEO context\nTarget real search terms\n50–60 char titles · 150–160 char descriptions"]
+        G --> ARIA["ARIA context\nNatural spoken language\nfor blind users in that locale"]
+        G --> GEN["Cultural context\nRight tone, formality & vocabulary\nfor the target locale"]
+        SEO --> OUT["Translated strings"]
+        ARIA --> OUT
+        GEN --> OUT
+    end
 ```
 
 > **lingo.dev SDK owns the transport. I own the context.**
