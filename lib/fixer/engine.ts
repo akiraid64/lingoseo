@@ -190,6 +190,11 @@ async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
   const brandNames: Set<string> = new Set();
   let appName = "";
   let description = "";
+  // package.json name is the ONLY reliable brand source.
+  // File content may be corrupted by previous translation runs
+  // (e.g. "InvoiceFlow" → "FacturaFlujo" from a Spanish pass).
+  // package.json is never translated, so it's always clean.
+  let packageName = ""; // the raw package.json name, always trustworthy
 
   try {
     const pkg = JSON.parse(await readFile(join(cloneDir, "package.json"), "utf-8"));
@@ -199,8 +204,12 @@ async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
         .join("");
       appName = displayName;
+      packageName = displayName;
       brandNames.add(displayName);
       brandNames.add(pkg.name);
+      // Also add common variations: "Invoice Flow", "invoice-flow"
+      const spaced = pkg.name.split(/[-_]/).map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+      if (spaced !== displayName) brandNames.add(spaced);
     }
     if (pkg.description) description = pkg.description;
   } catch {}
@@ -283,10 +292,11 @@ async function geminiExtractStrings(
   if (!geminiApiKey) return {};
 
   const brandList = brand.brandNames.length > 0
-    ? `\nBRAND NAMES (include these as-is, do NOT skip them): ${brand.brandNames.join(", ")}`
+    ? `\nThe REAL brand/app name is: "${brand.appName}" (from package.json). Brand variations: ${brand.brandNames.join(", ")}`
     : "";
 
   const prompt = `You are a string extractor for a website localization tool.
+${brandList}
 
 Given this file (${filePath}), extract EVERY human-visible text string that needs translation.
 
@@ -297,12 +307,18 @@ EXTRACT ALL OF THESE:
 - Headings (h1-h6)
 - Paragraphs, spans, links, buttons, list items — ALL visible text
 - Navigation labels, footer text, badge text, section labels
+- Logo text (the text inside logo/brand elements)
 - Alt text on images
 - aria-label values
 - sr-only / screen-reader text
 - Pricing text, plan names, feature descriptions
 - ANY other human-readable string a user would see on the page
-${brandList}
+
+PLACEHOLDER DETECTION:
+If a title or description contains generic placeholder text in ANY language (e.g. "My Awesome Next.js App", "Nuestra App Next.js", "私のアプリ Next.js", etc.) — still extract it. Mark the key with a "_placeholder" suffix so the translator knows to replace it with the real brand name "${brand.appName}".
+
+BRAND CORRUPTION DETECTION:
+If you see the brand name "${brand.appName}" translated into another language (e.g. "FacturaFlujo" instead of "InvoiceFlow", "FakturaFluss" instead of "InvoiceFlow"), extract it — the translator will revert it to the original.
 
 DO NOT EXTRACT:
 - Import statements, export keywords, function names, variable names
@@ -312,7 +328,7 @@ DO NOT EXTRACT:
 - SVG content (paths, coordinates, viewBox values)
 - Numbers that are just numbers (but DO extract "$19/month" or date strings)
 - TypeScript types, interfaces
-- Comments (// or /* */)
+- Comments (// or /* */) — these are for developers, not users
 - Code identifiers like "onClick", "className", "href"
 
 Return a JSON object where:
@@ -390,35 +406,41 @@ async function geminiReplaceStrings(
   if (Object.keys(translationMap).length === 0) return originalContent;
 
   const brandList = brand.brandNames.length > 0
-    ? `\nBRAND NAMES — keep these EXACTLY as spelled, never translate: ${brand.brandNames.join(", ")}`
-    : "";
+    ? brand.brandNames.join(", ")
+    : "none detected";
 
   const prompt = `You are a precision file editor for website localization.
 
 TARGET LOCALE: ${targetLocale}
 
-TASK: Apply the translation map below to the file. For each original string → translated string, find and replace it in the file.
+TASK: Apply the translation map below to the file. Replace each original string with its translated version IN-PLACE on the same line.
 
 TRANSLATION MAP:
 ${JSON.stringify(translationMap, null, 2)}
 
-ALSO DO THESE METADATA UPDATES:
+METADATA UPDATES:
 - Set <html lang="..."> to "${targetLocale}"
 - Set og:locale / locale: to "${targetLocale.replace("-", "_")}"
 - Set inLanguage in any JSON-LD to "${targetLocale}"
-- Update any hreflang values (except x-default) to "${targetLocale}"
+- For hreflang alternates: ADD "${targetLocale}" as an alternate, keep existing alternates (en, es, etc.)
 - Remove any data-aria-* attributes (stale from previous runs)
-- If any human-visible string in the file is NOT in the target locale and NOT in the translation map, translate it to ${targetLocale} anyway — the output must be 100% in ${targetLocale} (except brand names and code)
-${brandList}
+- Any user-visible string NOT in ${targetLocale} and NOT in the translation map → translate it to ${targetLocale} too. Output must be 100% ${targetLocale} for user-visible text.
+
+BRAND NAME PROTECTION:
+The original brand name is: "${brand.appName}"
+All brand variations to preserve exactly: ${brandList}
+- NEVER translate brand names. Keep them exactly as listed above.
+- If you see a TRANSLATED version of the brand name from a previous locale run (e.g. "FacturaFlujo" instead of "InvoiceFlow", "발票플로우" instead of "InvoiceFlow"), REVERT it back to the original English brand name "${brand.appName}".
+- Logo text (inside elements with class "logo", "footer-logo", "brand", or "navbar-brand") must use the original brand name, never a translation.
 
 CRITICAL RULES:
-1. ONLY change text strings and metadata values — NEVER modify code structure, imports, JSX syntax, component logic, CSS, class names, or TypeScript types
-2. Preserve ALL formatting: indentation, line breaks, quotes (single vs double), semicolons, commas
-3. Do NOT add or remove any lines of code
-4. Do NOT change any import statements, function signatures, variable declarations, or JSX structure
-5. SVG content (paths, coordinates, viewBox) must stay EXACTLY the same
-6. If a string appears multiple times, translate ALL occurrences
-7. Brand names must stay in their original form: ${brand.brandNames.join(", ") || "none detected"}
+1. Replace strings IN-PLACE on the same line — NEVER duplicate a key by adding a new line and keeping the old one. Each metadata key (title:, description:, locale:, etc.) must appear exactly ONCE.
+2. ONLY change text strings and metadata values — NEVER modify code structure, imports, JSX syntax, component logic, CSS, class names, or TypeScript types
+3. Preserve ALL formatting: indentation, line breaks, quotes (single vs double), semicolons, commas
+4. The output must have the SAME number of lines as the input. Do NOT add or remove lines.
+5. NEVER translate code comments (// or /* */). Comments are for developers, not users. Leave them in their original language.
+6. SVG content (paths, coordinates, viewBox) must stay EXACTLY the same
+7. If a string appears multiple times, translate ALL occurrences
 8. Return the COMPLETE file — every single line, not just the changed parts
 
 ORIGINAL FILE (${filePath}):
@@ -563,6 +585,9 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
     }
   }
 
+  // ── Fix Font Awesome: if fa- classes found but no FA stylesheet, add CDN ──
+  await fixFontAwesome(cloneDir, globalLog);
+
   // ── Done ────────────────────────────────────────────────────────────
   globalLog.push(`[FIXER] Done — ${fixResults.length} files modified → ${locale}`);
 
@@ -579,4 +604,63 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
   }
 
   return fixResults;
+}
+
+
+// ── Font Awesome CDN injection ────────────────────────────────────────
+// If any file uses fa- classes (fa-brands, fa-solid, etc.) but no FA
+// stylesheet is loaded, inject the CDN link into layout.tsx or index.html.
+
+const FA_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css';
+
+async function fixFontAwesome(cloneDir: string, globalLog: string[]): Promise<void> {
+  // Check if any file uses FA icons
+  let usesFa = false;
+  const filesToCheck = ["app/page.tsx", "app/page.jsx", "src/app/page.tsx", "index.html"];
+  for (const f of filesToCheck) {
+    try {
+      const content = await readFile(join(cloneDir, f), "utf-8");
+      if (content.includes("fa-brands") || content.includes("fa-solid") || content.includes("fa-regular")) {
+        usesFa = true;
+        break;
+      }
+    } catch {}
+  }
+
+  if (!usesFa) return;
+
+  // Check if FA is already loaded in layout
+  const layoutCandidates = ["app/layout.tsx", "app/layout.jsx", "src/app/layout.tsx", "index.html", "public/index.html"];
+  for (const f of layoutCandidates) {
+    try {
+      let content = await readFile(join(cloneDir, f), "utf-8");
+
+      // Already has FA? Skip.
+      if (content.includes("font-awesome") || content.includes("fontawesome")) return;
+
+      // Inject FA CDN link
+      if (f.endsWith(".html")) {
+        // HTML: add before </head>
+        if (content.includes("</head>")) {
+          content = content.replace("</head>", `  <link rel="stylesheet" href="${FA_CDN}" />\n</head>`);
+          await writeFile(join(cloneDir, f), content, "utf-8");
+          globalLog.push(`[FA] ✓ Added Font Awesome CDN to ${f}`);
+          log.ok(`[FA] ✓ Added Font Awesome CDN to ${f}`);
+          return;
+        }
+      } else {
+        // TSX layout: add a <link> inside <head> or before <body>
+        // Next.js App Router: metadata export handles <head>, but we can add via the layout JSX
+        // The simplest: add an import and <link> in the <html> <head>
+        if (content.includes("<body>")) {
+          const faLink = `\n        <head>\n          <link rel="stylesheet" href="${FA_CDN}" />\n        </head>`;
+          content = content.replace("<body>", `${faLink}\n        <body>`);
+          await writeFile(join(cloneDir, f), content, "utf-8");
+          globalLog.push(`[FA] ✓ Added Font Awesome CDN to ${f}`);
+          log.ok(`[FA] ✓ Added Font Awesome CDN to ${f}`);
+          return;
+        }
+      }
+    } catch {}
+  }
 }
