@@ -6,7 +6,15 @@
       "WebFetch(domain:api.github.com)",
       "Bash(openssl rand:*)",
       "WebFetch(domain:lingo.dev)",
-      "WebFetch(domain:docs.lingo.dev)"
+      "WebFetch(domain:docs.lingo.dev)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:techcrunch.com)",
+      "WebFetch(domain:dev.to)",
+      "WebFetch(domain:www.wemakedevs.org)",
+      "WebFetch(domain:hackathon.dev)",
+      "WebFetch(domain:apidog.com)",
+      "WebFetch(domain:www.ycombinator.com)"
     ]
   }
 }
