@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import type { SeoIssue } from "@/types";
 import { randomUUID } from "crypto";
+import { DEPRECATED_SCHEMA, QUALITY_GATES, HREFLANG_RULES } from "@/lib/translation/seo-optimizer";
 
 type CheerioAPI = ReturnType<typeof cheerio.load>;
 
@@ -32,22 +33,22 @@ export function scanTitle(
         message: "Empty <title> tag — search engines need descriptive titles",
         currentValue: "",
       });
-    } else if (text.length < 30) {
+    } else if (text.length < QUALITY_GATES.title.min) {
       issues.push({
         id: randomUUID(),
         type: "missing-title",
         severity: "warning",
         filePath,
-        message: `Title too short (${text.length} chars) — aim for 50-60 characters for full SERP display`,
+        message: `Title too short (${text.length} chars) — aim for ${QUALITY_GATES.title.min}-${QUALITY_GATES.title.max} characters for full SERP display`,
         currentValue: text,
       });
-    } else if (text.length > 60) {
+    } else if (text.length > QUALITY_GATES.title.max) {
       issues.push({
         id: randomUUID(),
         type: "missing-title",
         severity: "warning",
         filePath,
-        message: `Title too long (${text.length} chars) — Google truncates at ~60 chars in search results`,
+        message: `Title too long (${text.length} chars) — Google truncates at ~${QUALITY_GATES.title.max} chars in search results`,
         currentValue: text,
       });
     }
@@ -84,22 +85,22 @@ export function scanMetaDescription(
         message: "Empty meta description content",
         currentValue: "",
       });
-    } else if (content.length < 150) {
+    } else if (content.length < QUALITY_GATES.metaDescription.min) {
       issues.push({
         id: randomUUID(),
         type: "missing-meta-description",
         severity: "warning",
         filePath,
-        message: `Meta description too short (${content.length} chars) — aim for 150-160 characters for full SERP display`,
+        message: `Meta description too short (${content.length} chars) — aim for ${QUALITY_GATES.metaDescription.min}-${QUALITY_GATES.metaDescription.max} characters for full SERP display`,
         currentValue: content,
       });
-    } else if (content.length > 160) {
+    } else if (content.length > QUALITY_GATES.metaDescription.max) {
       issues.push({
         id: randomUUID(),
         type: "missing-meta-description",
         severity: "info",
         filePath,
-        message: `Meta description too long (${content.length} chars) — Google truncates at ~160 chars`,
+        message: `Meta description too long (${content.length} chars) — Google truncates at ~${QUALITY_GATES.metaDescription.max} chars`,
         currentValue: content,
       });
     }
@@ -153,7 +154,7 @@ export function scanTwitterTags(
   return issues;
 }
 
-// Scan for missing hreflang alternate links
+// Scan for missing hreflang alternate links + validate codes using claude-seo rules
 export function scanHreflang(
   filePath: string,
   $: CheerioAPI
@@ -169,6 +170,37 @@ export function scanHreflang(
       filePath,
       message:
         "No hreflang tags found — Google cannot associate locale-specific pages, causing duplicate content penalties",
+    });
+    return issues;
+  }
+
+  // Validate individual hreflang codes
+  const codes: string[] = [];
+  hreflangs.each((_, el) => {
+    const code = $(el).attr("hreflang") || "";
+    codes.push(code);
+
+    if (code !== "x-default" && HREFLANG_RULES.invalidCodes.has(code)) {
+      const correction = (HREFLANG_RULES.corrections as Record<string, string>)[code];
+      issues.push({
+        id: randomUUID(),
+        type: "missing-hreflang",
+        severity: "warning",
+        filePath,
+        message: `Invalid hreflang code "${code}"${correction ? ` — use "${correction}" instead` : " — must be ISO 639-1 two-letter code"}`,
+        currentValue: code,
+      });
+    }
+  });
+
+  // Check for x-default (required per claude-seo)
+  if (HREFLANG_RULES.xDefaultRequired && !codes.includes("x-default")) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-hreflang",
+      severity: "warning",
+      filePath,
+      message: "Missing x-default hreflang tag — required as fallback for unmatched languages",
     });
   }
 
@@ -240,13 +272,13 @@ export function scanHeadings(
       filePath,
       message: "No <h1> tag found — primary heading is critical for page SEO",
     });
-  } else if (h1s.length > 1) {
+  } else if (h1s.length > QUALITY_GATES.h1PerPage) {
     issues.push({
       id: randomUUID(),
       type: "unoptimized-headings",
       severity: "info",
       filePath,
-      message: `Multiple <h1> tags found (${h1s.length}) — recommend single H1 per page`,
+      message: `Multiple <h1> tags found (${h1s.length}) — recommend exactly ${QUALITY_GATES.h1PerPage} H1 per page`,
     });
   }
 
@@ -298,16 +330,7 @@ export function scanViewport(
   return issues;
 }
 
-// Deprecated schema types (Google stopped supporting these)
-const DEPRECATED_SCHEMA_TYPES = new Set([
-  "HowTo",           // Deprecated Sept 2023
-  "FAQPage",         // Restricted to gov/health Aug 2023
-  "SpecialAnnouncement", // Deprecated July 2025
-  "CourseInfo",
-  "ClaimReview",
-  "VehicleListing",
-  "Dataset",
-]);
+// DEPRECATED_SCHEMA imported from seo-optimizer.ts (claude-seo Feb 2026 list)
 
 // Scan for JSON-LD schema issues
 export function scanJsonLd(
@@ -335,7 +358,7 @@ export function scanJsonLd(
       const parsed = JSON.parse(raw);
       const type = parsed["@type"] as string | undefined;
 
-      if (type && DEPRECATED_SCHEMA_TYPES.has(type)) {
+      if (type && DEPRECATED_SCHEMA.has(type)) {
         issues.push({
           id: randomUUID(),
           type: "invalid-schema",
@@ -448,6 +471,208 @@ export function scanSrOnly(
   return issues;
 }
 
+// ── STRUCTURAL ARIA SCANNERS ─────────────────────────────────────────────────
+// These detect MISSING aria attributes/roles — elements that SHOULD have
+// accessibility markup but don't. Different from the translation scanners
+// above which check existing labels that need localization.
+
+// Scan for nav elements without distinguishing aria-labels
+export function scanNavLandmarks(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+  const navs = $("nav").toArray();
+
+  // Multiple navs need aria-labels so screen readers can distinguish them
+  if (navs.length > 1) {
+    const unlabeled = navs.filter((el) => {
+      const label = $(el).attr("aria-label") || $(el).attr("aria-labelledby") || "";
+      return !label.trim();
+    });
+    if (unlabeled.length > 0) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-nav-label",
+        severity: "warning",
+        filePath,
+        message: `${unlabeled.length} of ${navs.length} <nav> elements have no aria-label — screen readers can't distinguish between main navigation and footer navigation`,
+        currentValue: unlabeled.map((el) => {
+          const cls = $(el).attr("class") || "";
+          return cls ? `<nav class="${cls}">` : "<nav>";
+        }).slice(0, 3).join(", "),
+      });
+    }
+  } else if (navs.length === 1) {
+    // Single nav — still recommend aria-label for clarity
+    const label = $(navs[0]).attr("aria-label") || $(navs[0]).attr("aria-labelledby") || "";
+    if (!label.trim()) {
+      issues.push({
+        id: randomUUID(),
+        type: "missing-nav-label",
+        severity: "info",
+        filePath,
+        message: "Single <nav> has no aria-label — adding one improves screen reader context (e.g. \"Main navigation\")",
+      });
+    }
+  }
+
+  return issues;
+}
+
+// Scan for missing skip navigation link
+export function scanSkipLink(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+
+  // Look for common skip link patterns
+  const skipSelectors = [
+    'a[href="#main"]', 'a[href="#main-content"]', 'a[href="#content"]',
+    'a[href="#maincontent"]', '.skip-link', '.skip-nav', '.skip-to-content',
+    '[class*="skip"]',
+  ];
+  const hasSkipLink = skipSelectors.some((sel) => $(sel).length > 0);
+
+  // Also check first <a> in <body> for skip-link-like text
+  const firstLink = $("body a").first();
+  const firstLinkText = firstLink.text().toLowerCase();
+  const isSkipLike = firstLinkText.includes("skip") || firstLinkText.includes("main content");
+
+  if (!hasSkipLink && !isSkipLike) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-skip-link",
+      severity: "warning",
+      filePath,
+      message: "No \"Skip to main content\" link — keyboard users must tab through the entire navigation on every page load",
+    });
+  }
+
+  return issues;
+}
+
+// Scan for decorative content not hidden from screen readers
+export function scanDecorativeContent(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+
+  // Emoji in text content — common pattern: emoji inside spans/divs as icons
+  const emojiPattern = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+  const emojiElements: string[] = [];
+
+  $("span, div, p, li, td, h1, h2, h3, h4, h5, h6").each((_, el) => {
+    const directText = $(el).contents().filter(function() {
+      return this.type === "text";
+    }).text();
+    if (emojiPattern.test(directText)) {
+      const hidden = $(el).attr("aria-hidden") || "";
+      const role = $(el).attr("role") || "";
+      if (hidden !== "true" && role !== "presentation" && role !== "img") {
+        const text = directText.trim().slice(0, 30);
+        emojiElements.push(text);
+      }
+    }
+  });
+
+  if (emojiElements.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "decorative-not-hidden",
+      severity: "info",
+      filePath,
+      message: `${emojiElements.length} element(s) contain decorative emoji visible to screen readers — they hear "rocket", "money bag" etc. Add aria-hidden="true" to parent or wrap emoji in <span aria-hidden="true">`,
+      currentValue: emojiElements.slice(0, 3).join(" | "),
+    });
+  }
+
+  // <i> tags (icon fonts like Font Awesome) without aria-hidden
+  const iconTags = $("i").toArray().filter((el) => {
+    const cls = $(el).attr("class") || "";
+    const hidden = $(el).attr("aria-hidden") || "";
+    // Icon font classes: fa-, icon-, bi-, material-icons, etc.
+    return (cls.match(/^(fa|icon|bi|material|glyphicon)/i) || cls.includes("fa-")) && hidden !== "true";
+  });
+
+  if (iconTags.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-icon-hiding",
+      severity: "warning",
+      filePath,
+      message: `${iconTags.length} icon element(s) (<i> with icon classes) missing aria-hidden="true" — screen readers read empty or garbled text for each icon`,
+      currentValue: iconTags.map((el) => `<i class="${$(el).attr("class")}">`).slice(0, 3).join(", "),
+    });
+  }
+
+  return issues;
+}
+
+// Scan for <a href="#"> used as buttons without role="button"
+export function scanActionLinks(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+
+  const actionLinks = $('a[href="#"], a[href="javascript:void(0)"], a[href="javascript:;"]').toArray().filter((el) => {
+    const role = $(el).attr("role") || "";
+    return role !== "button";
+  });
+
+  if (actionLinks.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "action-link-no-role",
+      severity: "info",
+      filePath,
+      message: `${actionLinks.length} link(s) use href="#" but have no role="button" — screen readers announce them as links, but they trigger actions. Users expect link behavior (navigation) not button behavior`,
+      currentValue: actionLinks.map((el) => {
+        const text = $(el).text().trim().slice(0, 30);
+        return `"${text}"`;
+      }).slice(0, 3).join(", "),
+    });
+  }
+
+  return issues;
+}
+
+// Scan for card/section structures that need region labels
+export function scanRegionLabels(
+  filePath: string,
+  $: CheerioAPI
+): SeoIssue[] {
+  const issues: SeoIssue[] = [];
+
+  // Sections without aria-label or aria-labelledby
+  const sections = $("section").toArray().filter((el) => {
+    const label = $(el).attr("aria-label") || $(el).attr("aria-labelledby") || "";
+    // Also check for heading as implicit label
+    const hasHeading = $(el).find("h1, h2, h3, h4, h5, h6").length > 0;
+    return !label.trim() && !hasHeading;
+  });
+
+  if (sections.length > 0) {
+    issues.push({
+      id: randomUUID(),
+      type: "missing-region-label",
+      severity: "info",
+      filePath,
+      message: `${sections.length} <section> element(s) have no aria-label and no heading — screen readers list these as unnamed regions, making page navigation confusing`,
+      currentValue: sections.map((el) => {
+        const cls = $(el).attr("class") || "";
+        const id = $(el).attr("id") || "";
+        return id ? `<section id="${id}">` : cls ? `<section class="${cls.split(" ")[0]}">` : "<section>";
+      }).slice(0, 3).join(", "),
+    });
+  }
+
+  return issues;
+}
+
 // Run all HTML scanners
 export function runAllScanners(
   filePath: string,
@@ -474,5 +699,11 @@ export function runAllScanners(
     ...scanJsonLd(filePath, $),
     ...scanAriaLabels(filePath, $),
     ...scanSrOnly(filePath, $),
+    // Structural ARIA
+    ...scanNavLandmarks(filePath, $),
+    ...scanSkipLink(filePath, $),
+    ...scanDecorativeContent(filePath, $),
+    ...scanActionLinks(filePath, $),
+    ...scanRegionLabels(filePath, $),
   ];
 }

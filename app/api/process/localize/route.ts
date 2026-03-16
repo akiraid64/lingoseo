@@ -40,16 +40,21 @@ export async function POST(req: Request) {
     return Response.json({ error: "Missing targetLocale or data" }, { status: 400 });
   }
 
-  const stringCount = Object.keys(data).length;
+  // Extract brand context if present (added by fixer engine)
+  const brandContext = data["__brand_context__"] || "";
+  const cleanData = { ...data };
+  delete cleanData["__brand_context__"];
+
+  const stringCount = Object.keys(cleanData).length;
   if (stringCount === 0) {
     return Response.json({ data: {} });
   }
 
   // Detect context from content patterns
-  const context = detectContext(data);
+  const context = detectContext(cleanData);
   const modelName = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-  log.info(`Engine: ${sourceLocale} → ${targetLocale} | context: ${context} | ${stringCount} strings | model: ${modelName}`);
+  log.info(`Engine: ${sourceLocale} → ${targetLocale} | context: ${context} | ${stringCount} strings | model: ${modelName}${brandContext ? " | brand hints present" : ""}`);
 
   try {
     const translated = await translateWithGemini({
@@ -57,8 +62,9 @@ export async function POST(req: Request) {
       modelName,
       sourceLocale: sourceLocale || "en",
       targetLocale,
-      data,
+      data: cleanData,
       context,
+      brandContext,
     });
 
     log.ok(`Engine translated ${Object.keys(translated).length} strings → ${targetLocale}`);
@@ -112,8 +118,9 @@ async function translateWithGemini(params: {
   targetLocale: string;
   data: Record<string, string>;
   context: "seo" | "aria" | "general";
+  brandContext?: string;
 }): Promise<Record<string, string>> {
-  const { geminiApiKey, modelName, sourceLocale, targetLocale, data, context } = params;
+  const { geminiApiKey, modelName, sourceLocale, targetLocale, data, context, brandContext } = params;
 
   const ai = new GoogleGenAI({ apiKey: geminiApiKey });
 
@@ -123,6 +130,10 @@ async function translateWithGemini(params: {
     general: `These are website content strings that may include SEO metadata and accessibility labels.`,
   }[context];
 
+  const brandRule = brandContext
+    ? `\n\nBRAND PROTECTION:\n${brandContext}\nThese are product/company names. NEVER translate, transliterate, or modify them. Keep them exactly as spelled in English.`
+    : "";
+
   const prompt = `You are a world-class localization specialist with deep expertise in SEO, web accessibility, and cultural adaptation.
 
 SOURCE LOCALE: ${sourceLocale}
@@ -130,26 +141,18 @@ TARGET LOCALE: ${targetLocale}
 
 WHAT YOU ARE TRANSLATING:
 ${contextInstructions}
-
-YOUR EXPERTISE FOR THIS LOCALE:
-You already know everything about ${targetLocale}:
-- What people in this market actually type into Google (not literal translations)
-- The cultural tone, formality level, and communication style
-- Regional dialect preferences and local idioms
-- How screen readers pronounce text in this language
-- Accessibility expectations for blind users in this locale
-- Which words feel trustworthy vs salesy in this culture
-- Script direction, punctuation rules, compound word conventions
+${brandRule}
 
 TRANSLATION RULES:
-1. SEO strings: translate to what people ACTUALLY SEARCH for in ${targetLocale} — high search volume terms, not dictionary translations
-2. ARIA/accessibility strings: write as natural spoken language a blind user would expect to hear — native-sounding, not translated
-3. Titles: 50-60 characters
-4. Meta descriptions: 150-160 characters
-5. Never translate HTML attribute names — only values
-6. Preserve any URLs, numbers, brand names, and code references exactly
-7. If a string is already in the target language or is untranslatable (URL, number, code), return it unchanged
-8. Use your cultural knowledge — you decide the right tone, formality, and vocabulary for ${targetLocale}
+1. ONLY translate the text content — never add, remove, or restructure anything
+2. SEO strings: translate to what people ACTUALLY SEARCH for in ${targetLocale} — high search volume terms, not dictionary translations
+3. ARIA/accessibility strings: write as natural spoken language a blind user would expect to hear — native-sounding, not translated
+4. Titles: 50-60 characters
+5. Meta descriptions: 150-160 characters
+6. NEVER translate brand names, product names, company names, or proper nouns that are part of the product identity
+7. Preserve any URLs, numbers, and code references exactly
+8. If a string is already in the target language or is untranslatable (URL, number, code), return it unchanged
+9. Use your cultural knowledge — you decide the right tone, formality, and vocabulary for ${targetLocale}
 
 INPUT STRINGS (JSON):
 ${JSON.stringify(data, null, 2)}

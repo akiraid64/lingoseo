@@ -420,72 +420,134 @@ export default function DashboardPage() {
               </div>
             </div>
 
-            {/* ── HEALTH MONITOR ── */}
-            <div style={{ border: "1px solid var(--border)", marginBottom: "24px" }}>
-              {/* Grade + bars */}
-              <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", borderBottom: "1px solid var(--border)" }}>
-                {/* Grade */}
+            {/* ── DIAGNOSTIC PANEL ── */}
+            <div style={{ border: "1px solid var(--border)", marginBottom: "24px", position: "relative", overflow: "hidden" }}>
+              {/* Scanline overlay */}
+              <div style={{
+                position: "absolute", inset: 0, pointerEvents: "none", zIndex: 1,
+                background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(168,255,62,0.015) 2px, rgba(168,255,62,0.015) 4px)",
+              }} />
+
+              {/* Top bar — terminal header */}
+              <div style={{
+                padding: "8px 16px",
+                borderBottom: "1px solid var(--border)",
+                display: "flex", alignItems: "center", gap: "8px",
+                background: "rgba(168,255,62,0.03)",
+              }}>
+                <div style={{ width: "6px", height: "6px", background: analysis.score.total >= 60 ? "var(--accent)" : "#f87171", boxShadow: `0 0 6px ${analysis.score.total >= 60 ? "var(--accent)" : "#f87171"}` }} />
+                <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.14em", fontFamily: "var(--font-mono)" }}>
+                  LINGOSEO://HEALTH-MONITOR v1.0 — {new Date().toISOString().split("T")[0]}
+                </span>
+                <span style={{ marginLeft: "auto", fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.1em" }}>
+                  PID {Math.floor(Math.random() * 9000 + 1000)}
+                </span>
+              </div>
+
+              {/* Grade + diagnostic bars */}
+              <div style={{ display: "grid", gridTemplateColumns: "140px 1fr" }}>
+                {/* Grade cell */}
                 <div style={{
                   borderRight: "1px solid var(--border)",
                   display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-                  padding: "24px 0",
-                  background: `${gradeColor(analysis.score.grade)}08`,
+                  padding: "28px 0",
+                  position: "relative",
+                  background: `radial-gradient(circle at center, ${gradeColor(analysis.score.grade)}08, transparent 70%)`,
                 }}>
+                  <div style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.16em", marginBottom: "8px", fontFamily: "var(--font-mono)" }}>
+                    GRADE
+                  </div>
                   <div style={{
                     fontFamily: "var(--font-display)",
-                    fontSize: "80px", lineHeight: 1,
+                    fontSize: "96px", lineHeight: 0.85,
                     color: gradeColor(analysis.score.grade),
-                  }}>{analysis.score.grade}</div>
-                  <div style={{ fontSize: "10px", color: "var(--fg-muted)", letterSpacing: "0.12em", marginTop: "4px" }}>
+                    textShadow: `0 0 40px ${gradeColor(analysis.score.grade)}30`,
+                    position: "relative",
+                  }}>
+                    {analysis.score.grade}
+                  </div>
+                  <div style={{
+                    marginTop: "8px", padding: "2px 10px",
+                    border: `1px solid ${gradeColor(analysis.score.grade)}60`,
+                    fontSize: "12px", fontFamily: "var(--font-mono)",
+                    color: gradeColor(analysis.score.grade),
+                    letterSpacing: "0.1em",
+                  }}>
                     {analysis.score.total}/100
                   </div>
                 </div>
-                {/* Terminal bars */}
-                <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "14px", justifyContent: "center" }}>
-                  <div style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.12em", marginBottom: "2px" }}>
-                    // SYSTEM HEALTH MONITOR
+
+                {/* Diagnostic bars */}
+                <div style={{ padding: "20px 24px", display: "flex", flexDirection: "column", gap: "12px", justifyContent: "center" }}>
+                  <div style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.14em", marginBottom: "4px", fontFamily: "var(--font-mono)" }}>
+                    {">"} SUBSYSTEM DIAGNOSTICS
                   </div>
                   {Object.entries(analysis.score.breakdown).map(([key, val]) => {
                     const c = scoreColor(val);
-                    const blocks = Math.round(val / 10);
+                    const pct = val;
+                    const label = key.replace(/([A-Z])/g, " $1").toUpperCase().trim();
+                    const status = val >= 80 ? "NOMINAL" : val >= 60 ? "DEGRADED" : "CRITICAL";
                     return (
-                      <div key={key} style={{ display: "grid", gridTemplateColumns: "96px 1fr 28px", gap: "10px", alignItems: "center" }}>
-                        <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.1em" }}>
-                          {key.replace(/([A-Z])/g, "_$1").toUpperCase()}
-                        </span>
-                        <div style={{ display: "flex", gap: "2px" }}>
-                          {Array.from({ length: 10 }).map((_, i) => (
-                            <div key={i} style={{
-                              flex: 1, height: "10px",
-                              background: i < blocks ? c : "rgba(255,255,255,0.06)",
-                              transition: "background 0.3s",
+                      <div key={key}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                          <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.1em", fontFamily: "var(--font-mono)" }}>
+                            {label}
+                          </span>
+                          <span style={{ fontSize: "9px", color: c, letterSpacing: "0.08em", fontFamily: "var(--font-mono)" }}>
+                            {status} [{val}]
+                          </span>
+                        </div>
+                        <div style={{ position: "relative", height: "8px", background: "rgba(255,255,255,0.04)", overflow: "hidden" }}>
+                          <div style={{
+                            position: "absolute", left: 0, top: 0, bottom: 0,
+                            width: `${pct}%`, background: c,
+                            boxShadow: `0 0 8px ${c}40`,
+                            transition: "width 0.6s ease-out",
+                          }} />
+                          {/* Tick marks */}
+                          {[25, 50, 75].map(tick => (
+                            <div key={tick} style={{
+                              position: "absolute", left: `${tick}%`, top: 0, bottom: 0,
+                              width: "1px", background: "rgba(255,255,255,0.08)",
                             }} />
                           ))}
                         </div>
-                        <span style={{ fontSize: "10px", color: c, textAlign: "right", fontFamily: "var(--font-mono)" }}>{val}</span>
                       </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Severity counts */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr" }}>
+              {/* Severity readout — horizontal strip */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid var(--border)" }}>
                 {[
-                  { label: "CRITICAL", count: analysis.summary.critical, color: "#f87171", desc: "Blocking search ranking" },
-                  { label: "WARNING", count: analysis.summary.warning, color: "#facc15", desc: "Hurting discoverability" },
-                  { label: "INFO", count: analysis.summary.info, color: "#60a5fa", desc: "Could be improved" },
+                  { label: "CRITICAL", count: analysis.summary.critical, color: "#f87171", icon: "▲", desc: "Blocks search indexing" },
+                  { label: "WARNING", count: analysis.summary.warning, color: "#facc15", icon: "◆", desc: "Hurts discoverability" },
+                  { label: "INFO", count: analysis.summary.info, color: "#60a5fa", icon: "●", desc: "Optimization opportunity" },
                 ].map((s, i) => (
                   <div key={s.label} style={{
-                    padding: "16px 20px",
+                    padding: "14px 20px",
                     borderRight: i < 2 ? "1px solid var(--border)" : "none",
-                    borderTop: "1px solid var(--border)",
+                    position: "relative",
+                    overflow: "hidden",
                   }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px" }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontSize: "40px", color: s.color, lineHeight: 1 }}>{s.count}</span>
-                      <span style={{ fontSize: "9px", color: s.color, letterSpacing: "0.1em", opacity: 0.8 }}>{s.label}</span>
+                    {/* Glow behind count when > 0 */}
+                    {s.count > 0 && (
+                      <div style={{
+                        position: "absolute", left: "16px", top: "50%", transform: "translateY(-50%)",
+                        width: "40px", height: "40px", borderRadius: "50%",
+                        background: `${s.color}12`, filter: "blur(12px)", pointerEvents: "none",
+                      }} />
+                    )}
+                    <div style={{ display: "flex", alignItems: "baseline", gap: "8px", position: "relative" }}>
+                      <span style={{ fontSize: "10px", color: s.color }}>{s.icon}</span>
+                      <span style={{
+                        fontFamily: "var(--font-display)", fontSize: "36px",
+                        color: s.count > 0 ? s.color : "rgba(255,255,255,0.15)", lineHeight: 1,
+                      }}>{s.count}</span>
+                      <span style={{ fontSize: "8px", color: s.color, letterSpacing: "0.12em", opacity: 0.8 }}>{s.label}</span>
                     </div>
-                    <div style={{ fontSize: "9px", color: "var(--fg-muted)", marginTop: "4px", letterSpacing: "0.05em" }}>{s.desc}</div>
+                    <div style={{ fontSize: "9px", color: "var(--fg-muted)", marginTop: "4px", letterSpacing: "0.05em", position: "relative" }}>{s.desc}</div>
                   </div>
                 ))}
               </div>
@@ -539,6 +601,23 @@ export default function DashboardPage() {
                   zh: "WeChat uses OG tags for link previews — without them, your shared link shows as a plain URL, which Chinese users associate with scam content.",
                   ru: "VKontakte, the dominant Russian social network, uses OG tags for link previews. Without them, shared links look broken.",
                 },
+                "missing-nav-label": {
+                  ar: "Arabic screen readers process landmarks right-to-left. Unlabeled navs are even more confusing because the user has zero context about which navigation region they've entered.",
+                  ja: "Japanese assistive technology users heavily rely on landmark navigation. Japanese JAWS/NVDA users report unlabeled navs as one of the top frustrations.",
+                  de: "Germany's BFSG (Barrierefreiheitsstärkungsgesetz) requires labeled landmarks by June 2025. Unlabeled navigation is a compliance risk.",
+                  fr: "France's RGAA 4.1 requires all navigation landmarks to be distinguishable. This is a legal requirement, not just best practice.",
+                },
+                "missing-skip-link": {
+                  ar: "Right-to-left keyboards navigate differently — without a skip link, Arabic keyboard users must tab through the entire nav in reverse visual order, which is deeply disorienting.",
+                  ja: "Japanese websites often have dense navigation with 30+ links. Without skip links, keyboard users spend significant time reaching the main content.",
+                  de: "BFSG accessibility law requires keyboard navigation shortcuts. Skip links are the minimum viable implementation.",
+                  fr: "RGAA criterion 12.7 explicitly mandates skip links. French government auditors check for this specifically.",
+                },
+                "decorative-not-hidden": {
+                  ja: "Japanese screen readers (PC-Talker, NVDA-JP) read emoji Unicode names in English even on Japanese pages. A blind Japanese user suddenly hears English words mid-sentence.",
+                  ko: "Korean screen readers read emoji as their Unicode names — often in English — breaking the flow of Korean text for blind users.",
+                  zh: "Chinese screen readers pronounce emoji names in English or as Unicode codepoints, creating an incomprehensible mix of languages for blind Mandarin speakers.",
+                },
               };
 
               const localeRegion = targetLocale.split("-")[0].toLowerCase();
@@ -546,7 +625,7 @@ export default function DashboardPage() {
                 return LOCALE_CONTEXT[issueType]?.[localeRegion] || null;
               };
 
-              // Before/after examples now reflect IN-PLACE replacement (not data attributes)
+              // Before/after examples — IN-PLACE replacement
               const locale = targetLocale.toUpperCase();
               const ISSUE_META: Record<string, { title: string; plain: string; category: "SEO" | "ARIA" | "TECHNICAL"; catColor: string; beforeEx: string; afterEx: string }> = {
                 "missing-title": {
@@ -626,30 +705,68 @@ export default function DashboardPage() {
                   beforeEx: `{ "name": "Blue Running Shoe" }`,
                   afterEx: `{ "name": "[translated to ${locale}]" }`,
                 },
+                // ── Structural ARIA issues ──
+                "missing-nav-label": {
+                  title: "Navigation Has No Label",
+                  plain: "When a page has multiple <nav> elements (header + footer), screen readers list them all as \"navigation\" with no way to tell them apart. Each needs an aria-label.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<nav>\n  <ul class="nav-links">...</ul>\n</nav>`,
+                  afterEx: `<nav aria-label="[translated: Main navigation]">\n  <ul class="nav-links">...</ul>\n</nav>`,
+                },
+                "missing-skip-link": {
+                  title: "No Skip Navigation Link",
+                  plain: "Keyboard users must tab through every nav link on every page load. A hidden \"Skip to main content\" link lets them jump straight to the content — it's a WCAG 2.1 requirement.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<body>\n  <nav><!-- 15 links --></nav>\n  <main>...`,
+                  afterEx: `<body>\n  <a class="sr-only" href="#main">\n    [translated: Skip to main content]\n  </a>\n  <nav>...`,
+                },
+                "decorative-not-hidden": {
+                  title: "Decorative Emoji Read Aloud",
+                  plain: "Screen readers announce every emoji — a sighted user sees a rocket icon, but a blind user hears \"rocket\" interrupting the sentence. Decorative emoji should be hidden from assistive tech.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<span>🚀 Fast Deploys</span>\n<!-- SR reads: "rocket Fast Deploys" -->`,
+                  afterEx: `<span><span aria-hidden="true">🚀</span>\n  Fast Deploys</span>`,
+                },
+                "action-link-no-role": {
+                  title: "Action Button Pretending to Be a Link",
+                  plain: "Links with href=\"#\" that trigger actions confuse screen readers — they announce \"link\" but the element behaves like a button. Blind users expect links to navigate somewhere.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<a href="#">Get Started</a>\n<!-- SR: "link, Get Started" -->`,
+                  afterEx: `<a href="#" role="button">\n  Get Started\n</a>\n<!-- or better: <button> -->`,
+                },
+                "missing-region-label": {
+                  title: "Unnamed Page Section",
+                  plain: "Screen reader users navigate by landmarks (regions). A <section> without a heading or aria-label appears as \"unnamed region\" — useless for navigation.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<section class="pricing">\n  <!-- no heading, no label -->\n</section>`,
+                  afterEx: `<section aria-label="[translated: Pricing]">\n  ...\n</section>`,
+                },
+                "missing-icon-hiding": {
+                  title: "Icon Fonts Not Hidden from Screen Readers",
+                  plain: "Icon font <i> elements (Font Awesome, etc.) render as invisible empty text without the CSS loaded. Screen readers get silent gaps or garbled characters for each icon.",
+                  category: "ARIA", catColor: "#60a5fa",
+                  beforeEx: `<a href="/twitter">\n  <i class="fa-brands fa-twitter"></i>\n</a>`,
+                  afterEx: `<a href="/twitter" aria-label="[translated: Twitter]">\n  <i class="fa-brands fa-twitter"\n    aria-hidden="true"></i>\n</a>`,
+                },
               };
 
-              // Only show issues that the fixer will TRANSLATE — no technical faults
+              // Only show issues the fixer will TRANSLATE — no technical faults
               const showSeo = fixModes.seo || fixModes.fullPage;
               const showAria = fixModes.aria || fixModes.fullPage;
 
-              // Only include issues that have a known ISSUE_META entry (SEO or ARIA)
               const relevantIssues = analysis.issues.filter(i => {
                 const meta = ISSUE_META[i.type];
-                if (!meta) return false; // skip unknown/technical issues
+                if (!meta) return false;
                 if (meta.category === "SEO" && !showSeo) return false;
                 if (meta.category === "ARIA" && !showAria) return false;
                 return true;
               });
 
               const grouped: Record<string, typeof analysis.issues> = {};
-              if (showSeo) {
-                grouped.SEO = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "SEO");
-              }
-              if (showAria) {
-                grouped.ARIA = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "ARIA");
-              }
+              if (showSeo) grouped.SEO = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "SEO");
+              if (showAria) grouped.ARIA = relevantIssues.filter(i => ISSUE_META[i.type]?.category === "ARIA");
 
-              // Deduplicate: only show one issue per type+filePath combo
+              // Deduplicate: one issue per type+filePath
               for (const cat of Object.keys(grouped)) {
                 const seen = new Set<string>();
                 grouped[cat] = grouped[cat].filter(i => {
@@ -660,9 +777,9 @@ export default function DashboardPage() {
                 });
               }
 
-              const catConfig: Record<string, { color: string; label: string; desc: string }> = {
-                SEO: { color: "var(--accent)", label: "SEO TRANSLATIONS", desc: "Titles, descriptions, headings, alt text, OG tags → translated to " + locale },
-                ARIA: { color: "#60a5fa", label: "ARIA TRANSLATIONS", desc: "aria-label attributes, .sr-only text → translated to " + locale },
+              const catConfig: Record<string, { color: string; label: string; desc: string; modeKey: string }> = {
+                SEO: { color: "var(--accent)", label: "SEO TRANSLATIONS", desc: "Titles, descriptions, headings, alt text, OG tags → translated to " + locale, modeKey: "SEO METADATA" },
+                ARIA: { color: "#60a5fa", label: "ARIA TRANSLATIONS", desc: "aria-label, .sr-only text → translated to " + locale, modeKey: "ARIA + SCREEN READER" },
               };
 
               return (Object.entries(grouped) as [string, typeof analysis.issues][]).map(([cat, issues]) => {
@@ -670,24 +787,36 @@ export default function DashboardPage() {
                 const cfg = catConfig[cat];
                 return (
                   <div key={cat} style={{ marginBottom: "24px" }}>
-                    {/* Category header */}
+                    {/* Category header — connects to fix mode */}
                     <div style={{
                       display: "flex", alignItems: "center", gap: "12px",
                       padding: "10px 16px",
-                      background: `${cfg.color}10`,
-                      border: `1px solid ${cfg.color}40`,
-                      borderBottom: "none",
+                      background: `${cfg.color}08`,
+                      borderTop: `2px solid ${cfg.color}`,
+                      borderLeft: `1px solid ${cfg.color}30`,
+                      borderRight: `1px solid ${cfg.color}30`,
                       marginBottom: 0,
                     }}>
+                      <div style={{
+                        width: "8px", height: "8px",
+                        background: cfg.color,
+                        boxShadow: `0 0 6px ${cfg.color}60`,
+                        flexShrink: 0,
+                      }} />
                       <span style={{
                         fontFamily: "var(--font-display)", fontSize: "18px",
                         color: cfg.color, letterSpacing: "0.08em",
                       }}>{cfg.label}</span>
-                      <span style={{ fontSize: "9px", color: cfg.color, opacity: 0.6, letterSpacing: "0.1em" }}>
+                      <span style={{
+                        fontSize: "8px", padding: "2px 6px",
+                        border: `1px solid ${cfg.color}40`,
+                        color: cfg.color, letterSpacing: "0.1em",
+                        opacity: 0.7,
+                      }}>
                         {issues.length} ISSUE{issues.length !== 1 ? "S" : ""}
                       </span>
-                      <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.06em", marginLeft: "auto" }}>
-                        {cfg.desc}
+                      <span style={{ fontSize: "9px", color: "var(--fg-muted)", letterSpacing: "0.05em", marginLeft: "auto" }}>
+                        FIXED BY: {cfg.modeKey}
                       </span>
                     </div>
 
@@ -695,93 +824,119 @@ export default function DashboardPage() {
                     {issues.map((issue, idx) => {
                       const meta = ISSUE_META[issue.type];
                       const sColor = issue.severity === "critical" ? "#f87171" : issue.severity === "warning" ? "#facc15" : "#60a5fa";
+                      const sIcon = issue.severity === "critical" ? "▲" : issue.severity === "warning" ? "◆" : "●";
                       return (
                         <div key={issue.id} style={{
-                          border: `1px solid ${cfg.color}30`,
-                          borderTop: idx === 0 ? `1px solid ${cfg.color}40` : "none",
-                          padding: "16px 20px",
-                          background: "#0a0a0a",
+                          borderLeft: `1px solid ${cfg.color}30`,
+                          borderRight: `1px solid ${cfg.color}30`,
+                          borderBottom: `1px solid ${cfg.color}20`,
+                          padding: "20px 20px 16px",
+                          background: idx % 2 === 0 ? "#0a0a0a" : "#090909",
+                          position: "relative",
                         }}>
-                          <div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: meta ? "10px" : 0 }}>
-                            <div style={{
-                              width: "6px", height: "6px", borderRadius: "50%",
-                              background: sColor, marginTop: "5px", flexShrink: 0,
-                            }} />
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "4px" }}>
-                                {meta ? (
-                                  <span style={{ fontFamily: "var(--font-display)", fontSize: "16px", letterSpacing: "0.04em", color: "var(--fg)" }}>
-                                    {meta.title}
-                                  </span>
-                                ) : (
-                                  <span style={{ fontSize: "12px", color: "var(--fg)" }}>{issue.message}</span>
-                                )}
-                                <span style={{
-                                  fontSize: "8px", letterSpacing: "0.12em",
-                                  color: sColor, border: `1px solid ${sColor}`,
-                                  padding: "1px 5px",
-                                }}>{issue.severity.toUpperCase()}</span>
-                              </div>
-                              {meta && (
-                                <>
-                                  <p style={{ fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.7, margin: 0, maxWidth: "600px" }}>
-                                    {meta.plain}
-                                  </p>
-                                  {getLocaleContext(issue.type) && (
-                                    <div style={{
-                                      marginTop: "8px",
-                                      padding: "8px 12px",
-                                      background: "rgba(168,255,62,0.04)",
-                                      border: "1px solid rgba(168,255,62,0.2)",
-                                      borderLeft: "3px solid var(--accent)",
-                                      maxWidth: "600px",
-                                    }}>
-                                      <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.12em", marginBottom: "4px", fontFamily: "var(--font-mono)" }}>
-                                        WHY THIS HURTS FOR {targetLocale.toUpperCase()} USERS
-                                      </div>
-                                      <p style={{ fontSize: "10px", color: "rgba(168,255,62,0.75)", lineHeight: 1.7, margin: 0 }}>
-                                        {getLocaleContext(issue.type)}
-                                      </p>
-                                    </div>
-                                  )}
-                                </>
-                              )}
-                              <div style={{ fontSize: "9px", color: "var(--fg-muted)", marginTop: "6px", letterSpacing: "0.05em", opacity: 0.5 }}>
-                                {issue.filePath}
-                                {issue.line ? ` : line ${issue.line}` : ""}
-                              </div>
-                            </div>
-                          </div>
+                          {/* Severity indicator — left edge */}
+                          <div style={{
+                            position: "absolute", left: 0, top: 0, bottom: 0,
+                            width: "3px", background: sColor,
+                            opacity: issue.severity === "critical" ? 1 : 0.5,
+                          }} />
 
-                          {/* Before / After — shows in-place replacement */}
-                          {meta && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginLeft: "18px", marginTop: "10px" }}>
-                              <div>
-                                <div style={{ fontSize: "8px", color: "#f87171", letterSpacing: "0.12em", marginBottom: "4px" }}>CURRENT (EN)</div>
-                                <pre style={{
-                                  margin: 0, padding: "10px 12px",
-                                  background: "rgba(248,113,113,0.05)",
-                                  border: "1px solid rgba(248,113,113,0.2)",
-                                  fontSize: "9px", color: "#f87171",
-                                  fontFamily: "var(--font-mono)",
-                                  lineHeight: 1.6, overflow: "auto",
-                                  whiteSpace: "pre-wrap", wordBreak: "break-all",
-                                }}>{issue.currentValue || meta.beforeEx}</pre>
-                              </div>
-                              <div>
-                                <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.12em", marginBottom: "4px" }}>AFTER ({locale})</div>
-                                <pre style={{
-                                  margin: 0, padding: "10px 12px",
-                                  background: "rgba(168,255,62,0.05)",
-                                  border: "1px solid rgba(168,255,62,0.2)",
-                                  fontSize: "9px", color: "var(--accent)",
-                                  fontFamily: "var(--font-mono)",
-                                  lineHeight: 1.6, overflow: "auto",
-                                  whiteSpace: "pre-wrap", wordBreak: "break-all",
-                                }}>{issue.suggestedFix || meta.afterEx}</pre>
-                              </div>
+                          <div style={{ marginLeft: "8px" }}>
+                            {/* Title row */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "6px" }}>
+                              <span style={{ fontSize: "10px", color: sColor }}>{sIcon}</span>
+                              {meta ? (
+                                <span style={{ fontFamily: "var(--font-display)", fontSize: "17px", letterSpacing: "0.04em", color: "var(--fg)" }}>
+                                  {meta.title}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: "12px", color: "var(--fg)" }}>{issue.message}</span>
+                              )}
+                              <span style={{
+                                fontSize: "8px", letterSpacing: "0.12em",
+                                color: sColor, border: `1px solid ${sColor}50`,
+                                padding: "1px 6px", background: `${sColor}08`,
+                              }}>{issue.severity.toUpperCase()}</span>
                             </div>
-                          )}
+
+                            {/* Plain English explanation */}
+                            {meta && (
+                              <>
+                                <p style={{ fontSize: "11px", color: "var(--fg-muted)", lineHeight: 1.8, margin: "0 0 0 20px", maxWidth: "580px" }}>
+                                  {meta.plain}
+                                </p>
+
+                                {/* Locale-specific context callout */}
+                                {getLocaleContext(issue.type) && (
+                                  <div style={{
+                                    marginTop: "10px", marginLeft: "20px",
+                                    padding: "10px 14px",
+                                    background: "rgba(168,255,62,0.03)",
+                                    borderLeft: "3px solid var(--accent)",
+                                    maxWidth: "580px",
+                                    position: "relative",
+                                  }}>
+                                    <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.14em", marginBottom: "5px", fontFamily: "var(--font-mono)" }}>
+                                      {">"} WHY THIS MATTERS FOR {targetLocale.toUpperCase()} USERS
+                                    </div>
+                                    <p style={{ fontSize: "10px", color: "rgba(168,255,62,0.7)", lineHeight: 1.7, margin: 0 }}>
+                                      {getLocaleContext(issue.type)}
+                                    </p>
+                                  </div>
+                                )}
+                              </>
+                            )}
+
+                            {/* File path */}
+                            <div style={{ fontSize: "9px", color: "var(--fg-muted)", marginTop: "8px", marginLeft: "20px", letterSpacing: "0.05em", opacity: 0.45, fontFamily: "var(--font-mono)" }}>
+                              {issue.filePath}
+                              {issue.line ? ` : ${issue.line}` : ""}
+                            </div>
+
+                            {/* Before / After — visual diff */}
+                            {meta && (
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 24px 1fr", gap: "0", marginLeft: "20px", marginTop: "12px" }}>
+                                <div>
+                                  <div style={{ fontSize: "8px", color: "#f87171", letterSpacing: "0.14em", marginBottom: "4px", fontFamily: "var(--font-mono)" }}>
+                                    BEFORE
+                                  </div>
+                                  <pre style={{
+                                    margin: 0, padding: "10px 12px",
+                                    background: "rgba(248,113,113,0.04)",
+                                    border: "1px solid rgba(248,113,113,0.15)",
+                                    borderRight: "none",
+                                    fontSize: "9px", color: "#f87171",
+                                    fontFamily: "var(--font-mono)",
+                                    lineHeight: 1.6, overflow: "auto",
+                                    whiteSpace: "pre-wrap", wordBreak: "break-all",
+                                    opacity: 0.8,
+                                  }}>{issue.currentValue || meta.beforeEx}</pre>
+                                </div>
+                                {/* Arrow connector */}
+                                <div style={{
+                                  display: "flex", alignItems: "center", justifyContent: "center",
+                                  paddingTop: "18px",
+                                }}>
+                                  <span style={{ fontSize: "14px", color: "var(--fg-muted)", opacity: 0.3 }}>→</span>
+                                </div>
+                                <div>
+                                  <div style={{ fontSize: "8px", color: "var(--accent)", letterSpacing: "0.14em", marginBottom: "4px", fontFamily: "var(--font-mono)" }}>
+                                    AFTER ({locale})
+                                  </div>
+                                  <pre style={{
+                                    margin: 0, padding: "10px 12px",
+                                    background: "rgba(168,255,62,0.04)",
+                                    border: "1px solid rgba(168,255,62,0.15)",
+                                    borderLeft: "none",
+                                    fontSize: "9px", color: "var(--accent)",
+                                    fontFamily: "var(--font-mono)",
+                                    lineHeight: 1.6, overflow: "auto",
+                                    whiteSpace: "pre-wrap", wordBreak: "break-all",
+                                  }}>{issue.suggestedFix || meta.afterEx}</pre>
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       );
                     })}

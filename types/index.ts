@@ -21,7 +21,14 @@ export type IssueType =
   | "untranslated-sr-only"
   | "missing-canonical"
   | "missing-viewport"
-  | "invalid-schema";
+  | "invalid-schema"
+  // Structural ARIA issues
+  | "missing-nav-label"
+  | "missing-skip-link"
+  | "decorative-not-hidden"
+  | "action-link-no-role"
+  | "missing-region-label"
+  | "missing-icon-hiding";
 
 export interface SeoIssue {
   id: string;
