@@ -42,65 +42,53 @@ interface BrandContext {
 //   4. If a string is already translated or is code, skip it
 // ──────────────────────────────────────────────────────────────────────────
 
+// ── Locale code normalization ─────────────────────────────────────────────
+// lingo.dev SDK validates locale codes with Zod at runtime.
+// It accepts: "en", "en-US", "zh-Hant" but REJECTS "en-us", "en_us".
+// Rule: language part lowercase, region/script part preserves case.
+// "en-US" ✓  "en-us" ✗  "EN-US" ✗  "en_US" ✗
+
+function normalizeLocaleCode(code: string): string {
+  const trimmed = code.trim().replace(/_/g, "-"); // normalize underscores to hyphens
+  const parts = trimmed.split("-");
+  if (parts.length === 1) {
+    // Simple language code: "en", "ja", "ar"
+    return parts[0].toLowerCase();
+  }
+  // Language-Region or Language-Script: "en-US", "zh-Hant"
+  // Language part is always lowercase, rest preserves original case
+  // e.g. "EN-us" → "en-US", "zh-hant" → "zh-Hant"
+  const lang = parts[0].toLowerCase();
+  const rest = parts.slice(1).map(p => {
+    // Script tags are 4 chars (Hant, Latn), region codes are 2 chars (US, GB)
+    if (p.length === 4) return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase(); // Script: Hant
+    if (p.length === 2) return p.toUpperCase(); // Region: US
+    return p; // Unknown — pass through
+  });
+  return [lang, ...rest].join("-");
+}
+
 // ── Source language detection ─────────────────────────────────────────────
-// Two-pass detection:
-//   Pass 1 (fast): Check <html lang> and metadata — zero API calls
-//   Pass 2 (Gemini): Sample visible text and ask Gemini to identify the language
-//
-// This handles any language, not just English. If someone has a Japanese site
-// and wants to translate to Korean, Gemini correctly identifies "ja" as source.
+// Always uses Gemini to identify the ACTUAL language of the content.
+// Never trusts <html lang> — it's often wrong (e.g. lang="en" on a Spanish site,
+// or stale from a previous translation run).
+// Gemini reads real text and tells us what language it actually is.
 
 async function detectSourceLocale(cloneDir: string): Promise<string> {
-  // ── Pass 1: Structural hints (free, instant) ────────────────────────
-
-  // Check HTML files for <html lang="...">
-  const htmlCandidates = [
-    "index.html", "public/index.html", "src/index.html",
-    "dist/index.html", "out/index.html",
-  ];
-  for (const f of htmlCandidates) {
-    try {
-      const html = await readFile(join(cloneDir, f), "utf-8");
-      const langMatch = html.match(/<html[^>]*\slang=["']([^"']+)["']/i);
-      if (langMatch && langMatch[1].trim() && langMatch[1].trim() !== "x-default") {
-        log.info(`[DETECT] Source locale from <html lang>: "${langMatch[1].trim()}" (${f})`);
-        return langMatch[1].trim().toLowerCase();
-      }
-    } catch {}
-  }
-
-  // Check layout files
-  const layoutFiles = [
-    "app/layout.tsx", "app/layout.jsx", "src/app/layout.tsx", "src/app/layout.jsx",
-  ];
-  for (const f of layoutFiles) {
-    try {
-      const content = await readFile(join(cloneDir, f), "utf-8");
-      const htmlLangMatch = content.match(/<html[^>]*\slang=["']([^"']+)["']/i);
-      if (htmlLangMatch && htmlLangMatch[1].trim()) {
-        log.info(`[DETECT] Source locale from layout <html lang>: "${htmlLangMatch[1].trim()}" (${f})`);
-        return htmlLangMatch[1].trim().toLowerCase();
-      }
-      const localeMatch = content.match(/locale:\s*["']([a-z]{2}(?:-[A-Za-z]{2,})?)["']/);
-      if (localeMatch) {
-        log.info(`[DETECT] Source locale from metadata: "${localeMatch[1]}" (${f})`);
-        return localeMatch[1].toLowerCase();
-      }
-    } catch {}
-  }
-
-  // ── Pass 2: Ask Gemini to identify the language from content ────────
-  const pageFiles = [
+  // ── Collect text samples from multiple files for accuracy ──────────
+  const contentFiles = [
     "app/page.tsx", "app/page.jsx", "src/app/page.tsx",
-    "pages/index.tsx", "pages/index.jsx", "index.html",
+    "app/layout.tsx", "app/layout.jsx", "src/app/layout.tsx",
+    "pages/index.tsx", "pages/index.jsx",
+    "index.html", "public/index.html", "src/index.html",
   ];
 
   let textSample = "";
-  for (const f of pageFiles) {
+  for (const f of contentFiles) {
     try {
       const content = await readFile(join(cloneDir, f), "utf-8");
       // Strip code, keep only human-readable text
-      textSample = content
+      const cleaned = content
         .replace(/<svg[\s\S]*?<\/svg>/gi, "")
         .replace(/import\s+.*?from\s+["'][^"']+["'];?/g, "")
         .replace(/export\s+(?:default\s+)?(?:function|const|class|interface|type)\b[^{]*/g, "")
@@ -111,8 +99,12 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
         .replace(/[{}()\[\]<>;:=.,!?@#$%^&*\/\\|~`"'0-9_\-+]+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      if (textSample.length > 100) break;
+      if (cleaned.length > 10) {
+        textSample += " " + cleaned;
+      }
     } catch {}
+    // Stop once we have enough text
+    if (textSample.length > 500) break;
   }
 
   if (textSample.length < 20) {
@@ -120,8 +112,8 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
     return "en";
   }
 
-  // Take a ~500 char sample (enough for Gemini, not too expensive)
-  const sample = textSample.slice(0, 500);
+  // Take a ~800 char sample (richer context for Gemini)
+  const sample = textSample.trim().slice(0, 800);
 
   try {
     const geminiApiKey = process.env.GEMINI_API_KEY;
@@ -131,18 +123,25 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
       return "en";
     }
 
-    const prompt = `What language is this text written in? Reply with ONLY the ISO 639-1 two-letter code (e.g. "en", "es", "ja", "ar", "zh", "fr", "de", "ko", "pt", "ru", "hi", "it", "nl", "tr", "vi", "uk", "sv", "pl", "id"). If mixed languages, reply with the DOMINANT language. Reply with ONLY the code, nothing else.
+    const prompt = `Identify the language of this website text. Reply with ONLY the ISO 639-1 two-letter language code.
+
+Valid codes: en, es, ja, ar, zh, fr, de, ko, pt, ru, hi, it, nl, tr, vi, uk, sv, pl, id, th, cs, ro, el, hu, da, fi, nb, sk, bg, hr, sr, ms, he, et, lv, lt, sl, ca, gl, eu, cy, ga, mt, sq, mk, bs, is, ka, hy, az, kk, uz, tg, ky, mn, my, lo, km, si, ne, bn, ta, te, kn, ml, gu, mr, pa, ur, fa, ps, sw, am, ti, so, ha, yo, ig, zu
+
+If mixed languages, reply with the DOMINANT language. Reply with ONLY the two-letter code, nothing else.
 
 TEXT:
 "${sample}"`;
 
     const result = await callGemini(geminiApiKey, geminiModel, prompt);
-    const code = result.trim().toLowerCase().replace(/[^a-z-]/g, "").slice(0, 5);
+    const raw = result.trim().replace(/[^a-zA-Z-]/g, "").slice(0, 10);
+    const code = normalizeLocaleCode(raw);
 
     if (code && code.length >= 2) {
-      log.info(`[DETECT] Gemini identified source language: "${code}"`);
+      log.info(`[DETECT] Gemini identified source language: "${code}" (from ${sample.length} chars of content)`);
       return code;
     }
+
+    log.warn(`[DETECT] Gemini returned unusable code: "${result.trim()}" — defaulting to 'en'`);
   } catch (err) {
     log.warn(`[DETECT] Gemini detection failed: ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -209,16 +208,12 @@ export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
     return fixResults;
   }
 
-  // ── Step 0a: Detect source language ──────────────────────────────────
+  // ── Step 0a: Detect dominant source language ────────────────────────
+  // This is used as a hint for the SDK (which requires sourceLocale).
+  // The actual Gemini prompt handles mixed languages per-string —
+  // even if dominant is "es", it will still translate leftover "en" or "ja" strings.
   const sourceLang = await detectSourceLocale(cloneDir);
-  globalLog.push(`[DETECT] Source language: "${sourceLang}"`);
-
-  // Sanity check: if source and target are the same, warn and skip
-  if (sourceLang === locale || sourceLang.split("-")[0] === locale.split("-")[0]) {
-    globalLog.push(`[FIXER] Source (${sourceLang}) and target (${locale}) are the same language — nothing to translate`);
-    fixResults.push({ filePath: "__fixer_log__", originalContent: "", newContent: "", issuesFixed: [], log: globalLog });
-    return fixResults;
-  }
+  globalLog.push(`[DETECT] Dominant source language: "${sourceLang}" (Gemini will handle mixed languages per-string)`);
 
   // ── Step 0b: Extract brand context from the codebase ─────────────────
   const brand = await extractBrandContext(cloneDir);

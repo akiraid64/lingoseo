@@ -136,12 +136,19 @@ async function translateWithGemini(params: {
 
   const prompt = `You are a world-class localization specialist with deep expertise in SEO, web accessibility, and cultural adaptation.
 
-SOURCE LOCALE: ${sourceLocale}
 TARGET LOCALE: ${targetLocale}
+EXPECTED SOURCE LOCALE: ${sourceLocale} (but strings may be in ANY language — detect each string's actual language individually)
 
 WHAT YOU ARE TRANSLATING:
 ${contextInstructions}
 ${brandRule}
+
+CRITICAL — MIXED LANGUAGE HANDLING:
+The input strings may contain a MIX of languages (e.g. some English, some Spanish, some Japanese) from previous incomplete translation runs. For EVERY string:
+- Auto-detect what language it is currently in
+- If it is NOT already in ${targetLocale}, translate it to ${targetLocale}
+- If it IS already in ${targetLocale}, return it unchanged
+The result must be 100% in ${targetLocale} — zero leftover strings from any other language.
 
 TRANSLATION RULES:
 1. ONLY translate the text content — never add, remove, or restructure anything
@@ -151,7 +158,7 @@ TRANSLATION RULES:
 5. Meta descriptions: 150-160 characters
 6. NEVER translate brand names, product names, company names, or proper nouns that are part of the product identity
 7. Preserve any URLs, numbers, and code references exactly
-8. If a string is already in the target language or is untranslatable (URL, number, code), return it unchanged
+8. If a string is untranslatable (URL, number, code), return it unchanged
 9. Use your cultural knowledge — you decide the right tone, formality, and vocabulary for ${targetLocale}
 
 INPUT STRINGS (JSON):
