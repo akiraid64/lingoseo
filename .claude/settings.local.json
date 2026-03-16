@@ -16,7 +16,8 @@
       "WebFetch(domain:apidog.com)",
       "WebFetch(domain:www.ycombinator.com)",
       "Bash(npx skills:*)",
-      "Bash(ffmpeg:*)"
+      "Bash(ffmpeg:*)",
+      "Skill(humanizer)"
     ]
   }
 }
