@@ -32,50 +32,39 @@ interface BrandContext {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
-// TRANSLATION ONLY. Never adds, removes, or replaces existing code.
+// THREE-STEP GEMINI + SDK TRANSLATION ENGINE
 //
-// Rules:
-//   1. Only translate TEXT CONTENT — never touch code structure, imports,
-//      SVGs, CSS, class names, or JSX syntax
-//   2. Preserve brand names exactly (InvoiceFlow stays InvoiceFlow)
-//   3. One language in → one language out (in-place replacement)
-//   4. If a string is already translated or is code, skip it
+// Zero regex for string extraction or replacement.
+//
+// Step 1: EXTRACT — Gemini reads the file, returns ALL translatable strings as JSON
+// Step 2: TRANSLATE — lingo.dev SDK translates the JSON (our API → Gemini)
+// Step 3: REPLACE — Gemini takes original file + translation map, returns translated file
+//
+// Why: Regex missed ~35% of strings across 6 test passes. Gemini sees everything.
 // ──────────────────────────────────────────────────────────────────────────
 
 // ── Locale code normalization ─────────────────────────────────────────────
 // lingo.dev SDK validates locale codes with Zod at runtime.
 // It accepts: "en", "en-US", "zh-Hant" but REJECTS "en-us", "en_us".
-// Rule: language part lowercase, region/script part preserves case.
-// "en-US" ✓  "en-us" ✗  "EN-US" ✗  "en_US" ✗
 
 function normalizeLocaleCode(code: string): string {
-  const trimmed = code.trim().replace(/_/g, "-"); // normalize underscores to hyphens
+  const trimmed = code.trim().replace(/_/g, "-");
   const parts = trimmed.split("-");
-  if (parts.length === 1) {
-    // Simple language code: "en", "ja", "ar"
-    return parts[0].toLowerCase();
-  }
-  // Language-Region or Language-Script: "en-US", "zh-Hant"
-  // Language part is always lowercase, rest preserves original case
-  // e.g. "EN-us" → "en-US", "zh-hant" → "zh-Hant"
+  if (parts.length === 1) return parts[0].toLowerCase();
   const lang = parts[0].toLowerCase();
   const rest = parts.slice(1).map(p => {
-    // Script tags are 4 chars (Hant, Latn), region codes are 2 chars (US, GB)
     if (p.length === 4) return p.charAt(0).toUpperCase() + p.slice(1).toLowerCase(); // Script: Hant
     if (p.length === 2) return p.toUpperCase(); // Region: US
-    return p; // Unknown — pass through
+    return p;
   });
   return [lang, ...rest].join("-");
 }
 
 // ── Source language detection ─────────────────────────────────────────────
 // Always uses Gemini to identify the ACTUAL language of the content.
-// Never trusts <html lang> — it's often wrong (e.g. lang="en" on a Spanish site,
-// or stale from a previous translation run).
-// Gemini reads real text and tells us what language it actually is.
+// Never trusts <html lang> — it's often wrong or stale.
 
 async function detectSourceLocale(cloneDir: string): Promise<string> {
-  // ── Collect text samples from multiple files for accuracy ──────────
   const contentFiles = [
     "app/page.tsx", "app/page.jsx", "src/app/page.tsx",
     "app/layout.tsx", "app/layout.jsx", "src/app/layout.tsx",
@@ -87,7 +76,6 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
   for (const f of contentFiles) {
     try {
       const content = await readFile(join(cloneDir, f), "utf-8");
-      // Strip code, keep only human-readable text
       const cleaned = content
         .replace(/<svg[\s\S]*?<\/svg>/gi, "")
         .replace(/import\s+.*?from\s+["'][^"']+["'];?/g, "")
@@ -99,20 +87,16 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
         .replace(/[{}()\[\]<>;:=.,!?@#$%^&*\/\\|~`"'0-9_\-+]+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
-      if (cleaned.length > 10) {
-        textSample += " " + cleaned;
-      }
+      if (cleaned.length > 10) textSample += " " + cleaned;
     } catch {}
-    // Stop once we have enough text
     if (textSample.length > 500) break;
   }
 
   if (textSample.length < 20) {
-    log.warn("[DETECT] Not enough text to detect language — defaulting to 'en'");
+    log.warn("[DETECT] Not enough text — defaulting to 'en'");
     return "en";
   }
 
-  // Take a ~800 char sample (richer context for Gemini)
   const sample = textSample.trim().slice(0, 800);
 
   try {
@@ -123,11 +107,7 @@ async function detectSourceLocale(cloneDir: string): Promise<string> {
       return "en";
     }
 
-    const prompt = `Identify the language of this website text. Reply with ONLY the ISO 639-1 two-letter language code.
-
-Valid codes: en, es, ja, ar, zh, fr, de, ko, pt, ru, hi, it, nl, tr, vi, uk, sv, pl, id, th, cs, ro, el, hu, da, fi, nb, sk, bg, hr, sr, ms, he, et, lv, lt, sl, ca, gl, eu, cy, ga, mt, sq, mk, bs, is, ka, hy, az, kk, uz, tg, ky, mn, my, lo, km, si, ne, bn, ta, te, kn, ml, gu, mr, pa, ur, fa, ps, sw, am, ti, so, ha, yo, ig, zu
-
-If mixed languages, reply with the DOMINANT language. Reply with ONLY the two-letter code, nothing else.
+    const prompt = `Identify the DOMINANT language of this website text. Reply with ONLY the ISO 639-1 two-letter code (e.g. en, es, ja, ar, zh, fr, de, ko, hi). If mixed languages, reply with the DOMINANT one. ONLY the code, nothing else.
 
 TEXT:
 "${sample}"`;
@@ -137,23 +117,17 @@ TEXT:
     const code = normalizeLocaleCode(raw);
 
     if (code && code.length >= 2) {
-      log.info(`[DETECT] Gemini identified source language: "${code}" (from ${sample.length} chars of content)`);
+      log.info(`[DETECT] Gemini identified source language: "${code}"`);
       return code;
     }
-
-    log.warn(`[DETECT] Gemini returned unusable code: "${result.trim()}" — defaulting to 'en'`);
   } catch (err) {
     log.warn(`[DETECT] Gemini detection failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  log.warn("[DETECT] Could not detect source locale — defaulting to 'en'");
   return "en";
 }
 
 // ── File discovery ────────────────────────────────────────────────────────
-// Walk the cloned repo and find all files that could contain translatable content.
-// This ensures layout.tsx, page.tsx, and other content files are ALWAYS processed,
-// not just files that happen to have scanner-detected issues.
 
 const TRANSLATABLE_EXT = new Set([
   ".html", ".htm", ".php", ".ejs", ".astro", ".vue", ".svelte",
@@ -176,7 +150,6 @@ async function discoverTranslatableFiles(cloneDir: string): Promise<Set<string>>
     for (const entry of entries) {
       if (SKIP_DIRS.has(entry.name)) continue;
       const fullPath = join(dir, entry.name);
-
       if (entry.isDirectory()) {
         await walk(fullPath);
       } else {
@@ -192,180 +165,35 @@ async function discoverTranslatableFiles(cloneDir: string): Promise<Set<string>>
   return files;
 }
 
-export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
-  const { cloneDir, issues, targetLocales, fixModes } = params;
-
-  const fixResults: FixResult[] = [];
-  const globalLog: string[] = [];
-  const locale = targetLocales[0]; // one locale per PR
-
-  const modeLabel = [fixModes.seo && "SEO", fixModes.aria && "ARIA", fixModes.fullPage && "FULL-PAGE"].filter(Boolean).join("+");
-  globalLog.push(`[FIXER] Starting — ${modeLabel} → ${locale || "none"}`);
-
-  if (!locale) {
-    globalLog.push(`[FIXER] No target locale — nothing to translate`);
-    fixResults.push({ filePath: "__fixer_log__", originalContent: "", newContent: "", issuesFixed: [], log: globalLog });
-    return fixResults;
-  }
-
-  // ── Step 0a: Detect dominant source language ────────────────────────
-  // This is used as a hint for the SDK (which requires sourceLocale).
-  // The actual Gemini prompt handles mixed languages per-string —
-  // even if dominant is "es", it will still translate leftover "en" or "ja" strings.
-  const sourceLang = await detectSourceLocale(cloneDir);
-  globalLog.push(`[DETECT] Dominant source language: "${sourceLang}" (Gemini will handle mixed languages per-string)`);
-
-  // ── Step 0b: Extract brand context from the codebase ─────────────────
-  const brand = await extractBrandContext(cloneDir);
-  globalLog.push(`[BRAND] App name: "${brand.appName}" | Brand names: ${brand.brandNames.join(", ") || "none"}`);
-
-  // ── Step 0c: Discover ALL translatable files in the project ──────────
-  // Don't just process files with issues — scan every HTML/TSX/JSX file
-  // so that layout.tsx metadata, JSON-LD, OG tags, etc. always get translated
-  const allFiles = await discoverTranslatableFiles(cloneDir);
-  // Also include issue files that might not match the extension list
-  const issueFiles = new Set(issues.map(i => i.filePath));
-  for (const f of issueFiles) {
-    if (f !== "sitemap.xml") allFiles.add(f);
-  }
-  globalLog.push(`[FIXER] Found ${allFiles.size} translatable files`);
-
-  for (const filePath of allFiles) {
-    if (filePath === "sitemap.xml") continue;
-
-    const fullPath = join(cloneDir, filePath);
-    let content: string;
-    try {
-      content = await readFile(fullPath, "utf-8");
-    } catch {
-      globalLog.push(`[SKIP] ${filePath} — not found`);
-      continue;
-    }
-
-    const originalContent = content;
-    const ext = extname(filePath).toLowerCase();
-    const isHtml = [".html", ".htm", ".php", ".ejs", ".astro", ".vue", ".svelte"].includes(ext);
-    const isTsx = [".tsx", ".jsx", ".ts", ".js"].includes(ext);
-    const fixedIssueIds: string[] = [];
-
-    // ── FULL PAGE: translate everything ─────────────────────────────
-    if (fixModes.fullPage) {
-      if (isHtml) {
-        log.info(`[FULL] ${filePath} (${sourceLang}) → ${locale}`);
-        try {
-          const translated = await translateHtml(content, sourceLang, locale);
-          content = translated;
-          fixedIssueIds.push("full-page");
-          log.ok(`[FULL] ✓ ${filePath}`);
-        } catch (err) {
-          log.err(`[FULL] ✗ ${filePath}`, err);
-          globalLog.push(`[FULL] ✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-      if (isTsx) {
-        log.info(`[FULL] ${filePath} (${sourceLang}) → ${locale} (TSX)`);
-        try {
-          content = await translateTsxContent(content, sourceLang, locale, brand);
-          fixedIssueIds.push("full-page");
-          log.ok(`[FULL] ✓ ${filePath}`);
-        } catch (err) {
-          log.err(`[FULL] ✗ ${filePath}`, err);
-          globalLog.push(`[FULL] ✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
-    }
-
-    // ── SEO: translate titles, descriptions, headings, alt text ─────
-    if (fixModes.seo && !fixModes.fullPage) {
-      if (isHtml) {
-        try {
-          content = await translateHtmlSeo(content, sourceLang, locale, brand);
-          fixedIssueIds.push("seo");
-          log.ok(`[SEO] ✓ ${filePath} → ${locale}`);
-        } catch (err) {
-          log.err(`[SEO] ✗ ${filePath}`, err);
-        }
-      }
-      if (isTsx) {
-        try {
-          content = await translateTsxSeo(content, sourceLang, locale, brand);
-          fixedIssueIds.push("seo");
-          log.ok(`[SEO] ✓ ${filePath} → ${locale}`);
-        } catch (err) {
-          log.err(`[SEO] ✗ ${filePath}`, err);
-        }
-      }
-    }
-
-    // ── ARIA: translate aria-labels and sr-only text ────────────────
-    if (fixModes.aria && !fixModes.fullPage) {
-      if (isHtml) {
-        try {
-          content = await translateHtmlAria(content, sourceLang, locale);
-          fixedIssueIds.push("aria");
-          log.ok(`[ARIA] ✓ ${filePath} → ${locale}`);
-        } catch (err) {
-          log.err(`[ARIA] ✗ ${filePath}`, err);
-        }
-      }
-      if (isTsx) {
-        try {
-          content = await translateTsxAria(content, sourceLang, locale);
-          fixedIssueIds.push("aria");
-          log.ok(`[ARIA] ✓ ${filePath} → ${locale}`);
-        } catch (err) {
-          log.err(`[ARIA] ✗ ${filePath}`, err);
-        }
-      }
-    }
-
-    // Write modified file back
-    if (content !== originalContent && fixedIssueIds.length > 0) {
-      await writeFile(fullPath, content, "utf-8");
-      fixResults.push({
-        filePath,
-        originalContent,
-        newContent: content,
-        issuesFixed: fixedIssueIds,
-        log: [`${filePath} — ${fixedIssueIds.join(", ")} → ${locale}`],
-      });
-      globalLog.push(`[WRITE] ✓ ${filePath} — ${fixedIssueIds.join(", ")}`);
-    }
-  }
-
-  // ── Done ────────────────────────────────────────────────────────────
-  globalLog.push(`[FIXER] Done — ${fixResults.length} files modified → ${locale}`);
-
-  if (fixResults.length > 0) {
-    fixResults[0].log = [...globalLog, ...(fixResults[0].log || [])];
-  } else {
-    fixResults.push({
-      filePath: "__fixer_log__",
-      originalContent: "",
-      newContent: "",
-      issuesFixed: [],
-      log: globalLog,
-    });
-  }
-
-  return fixResults;
-}
-
-
 // ── Brand context extraction ────────────────────────────────────────────
-// Reads the codebase to find the real app name, brand names, and existing
-// metadata so translations preserve branding instead of translating it.
+
+function isGenericPlaceholder(text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    lower.includes("my awesome") ||
+    lower.includes("my app") ||
+    lower.includes("next.js app") ||
+    lower.includes("create next app") ||
+    lower.includes("welcome to") ||
+    lower.includes("getting started") ||
+    lower.includes("example") ||
+    lower.includes("placeholder") ||
+    lower.includes("lorem ipsum") ||
+    lower.includes("untitled") ||
+    lower.includes("default") ||
+    lower === "home" ||
+    lower === "app"
+  );
+}
 
 async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
   const brandNames: Set<string> = new Set();
   let appName = "";
   let description = "";
 
-  // 1. Read package.json for the project name
   try {
     const pkg = JSON.parse(await readFile(join(cloneDir, "package.json"), "utf-8"));
     if (pkg.name && !pkg.name.includes("/") && pkg.name !== "my-app" && pkg.name !== "next-app") {
-      // Convert package name to display name: "invoice-flow" → "InvoiceFlow"
       const displayName = pkg.name
         .split(/[-_]/)
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -377,33 +205,24 @@ async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
     if (pkg.description) description = pkg.description;
   } catch {}
 
-  // 2. Scan layout.tsx / page.tsx for metadata exports with real brand names
   for (const metaFile of ["app/layout.tsx", "app/layout.jsx", "app/page.tsx", "app/page.jsx", "src/app/layout.tsx", "src/app/page.tsx"]) {
     try {
       const content = await readFile(join(cloneDir, metaFile), "utf-8");
 
-      // Extract title from metadata
       const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
-      if (titleMatch) {
-        const title = titleMatch[1];
-        // Don't use generic placeholders as the brand name
-        if (!isGenericPlaceholder(title)) {
-          // Extract the brand part (usually the first word/phrase before a colon or dash)
-          const brandPart = title.split(/[:\-–—|]/)[0].trim();
-          if (brandPart && brandPart.length > 1 && brandPart.length < 40) {
-            if (!appName) appName = brandPart;
-            brandNames.add(brandPart);
-          }
+      if (titleMatch && !isGenericPlaceholder(titleMatch[1])) {
+        const brandPart = titleMatch[1].split(/[:\-–—|]/)[0].trim();
+        if (brandPart && brandPart.length > 1 && brandPart.length < 40) {
+          if (!appName) appName = brandPart;
+          brandNames.add(brandPart);
         }
       }
 
-      // Extract description from metadata
       const descMatch = content.match(/description:\s*["']([^"']+)["']/);
       if (descMatch && !isGenericPlaceholder(descMatch[1])) {
         if (!description) description = descMatch[1];
       }
 
-      // Look for brand name constants: const APP_NAME = "..." or appName: "..."
       const brandPatterns = [
         /(?:APP_NAME|BRAND_NAME|SITE_NAME|appName|brandName|siteName)\s*[:=]\s*["']([^"']+)["']/g,
         /(?:company|brand|app)\s*[:=]\s*["']([^"']+)["']/gi,
@@ -417,25 +236,16 @@ async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
         }
       }
 
-      // Look for brand in JSX — the first <h1> or prominent text often has it
       const h1Match = content.match(/<h1[^>]*>([^<{]{2,60})<\/h1>/);
       if (h1Match) {
-        // Extract words that look like proper nouns (PascalCase or ALL CAPS)
-        const properNouns = h1Match[1].match(/[A-Z][a-z]+(?:[A-Z][a-z]+)+/g); // PascalCase like InvoiceFlow
+        const properNouns = h1Match[1].match(/[A-Z][a-z]+(?:[A-Z][a-z]+)+/g);
         if (properNouns) {
           for (const noun of properNouns) brandNames.add(noun);
         }
       }
-
-      // Look for the brand in navbar/header — often has the app name as logo text
-      const navBrandMatch = content.match(/(?:logo|brand|navbar|header)[^}]*>([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?)</i);
-      if (navBrandMatch && navBrandMatch[1].length < 30) {
-        brandNames.add(navBrandMatch[1].trim());
-      }
     } catch {}
   }
 
-  // 3. Fallback: if we still don't have a name, check common config files
   if (!appName) {
     for (const cfgFile of ["next.config.js", "next.config.ts", "next.config.mjs", "nuxt.config.ts", "astro.config.mjs"]) {
       try {
@@ -458,548 +268,315 @@ async function extractBrandContext(cloneDir: string): Promise<BrandContext> {
   };
 }
 
-// Common placeholder strings that are NOT real brand names
-function isGenericPlaceholder(text: string): boolean {
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("my awesome") ||
-    lower.includes("my app") ||
-    lower.includes("next.js app") ||
-    lower.includes("create next app") ||
-    lower.includes("welcome to") ||
-    lower.includes("getting started") ||
-    lower.includes("example") ||
-    lower.includes("placeholder") ||
-    lower.includes("lorem ipsum") ||
-    lower.includes("untitled") ||
-    lower.includes("default") ||
-    lower === "home" ||
-    lower === "app"
-  );
-}
 
-// Build a brand-aware context string for translation
-function brandHint(brand: BrandContext): string {
-  if (brand.brandNames.length === 0) return "";
-  return `\nDO NOT TRANSLATE these brand/product names — keep them exactly as-is: ${brand.brandNames.join(", ")}`;
-}
+// ══════════════════════════════════════════════════════════════════════════
+// STEP 1: GEMINI EXTRACT — Ask Gemini to find ALL translatable strings
+// ══════════════════════════════════════════════════════════════════════════
 
+async function geminiExtractStrings(
+  content: string,
+  filePath: string,
+  brand: BrandContext,
+): Promise<Record<string, string>> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  if (!geminiApiKey) return {};
 
-// ── HTML translations ──────────────────────────────────────────────────
+  const brandList = brand.brandNames.length > 0
+    ? `\nBRAND NAMES (include these as-is, do NOT skip them): ${brand.brandNames.join(", ")}`
+    : "";
 
-async function translateHtmlSeo(html: string, sourceLang: string, locale: string, brand: BrandContext): Promise<string> {
-  const $ = cheerio.load(html);
+  const prompt = `You are a string extractor for a website localization tool.
 
-  // Collect EXISTING SEO strings — only translate what's already there
-  const strings: Record<string, string> = {};
+Given this file (${filePath}), extract EVERY human-visible text string that needs translation.
 
-  const title = $("title").text().trim();
-  if (title && !isGenericPlaceholder(title)) {
-    strings["title"] = title;
-  }
+EXTRACT ALL OF THESE:
+- Page titles, meta descriptions, OG titles, OG descriptions, Twitter titles, Twitter descriptions
+- ALL text inside metadata exports (export const metadata = { ... }) — every string value that is human-readable
+- JSON-LD structured data — name, description, any human-readable string
+- Headings (h1-h6)
+- Paragraphs, spans, links, buttons, list items — ALL visible text
+- Navigation labels, footer text, badge text, section labels
+- Alt text on images
+- aria-label values
+- sr-only / screen-reader text
+- Pricing text, plan names, feature descriptions
+- ANY other human-readable string a user would see on the page
+${brandList}
 
-  const desc = $('meta[name="description"]').attr("content")?.trim();
-  if (desc && !isGenericPlaceholder(desc)) {
-    strings["description"] = desc;
-  }
+DO NOT EXTRACT:
+- Import statements, export keywords, function names, variable names
+- CSS class names, style values
+- URLs, file paths, email addresses
+- JSX syntax, HTML tags, attributes (except aria-label values and alt text values)
+- SVG content (paths, coordinates, viewBox values)
+- Numbers that are just numbers (but DO extract "$19/month" or date strings)
+- TypeScript types, interfaces
+- Comments (// or /* */)
+- Code identifiers like "onClick", "className", "href"
 
-  $("h1, h2, h3").each((i, el) => {
-    const text = $(el).text().trim();
-    if (text && !isInsideSvg($, el)) strings[`h_${i}`] = text;
-  });
+Return a JSON object where:
+- Keys are unique descriptive identifiers (e.g. "meta_title", "hero_heading", "nav_features", "pricing_free_name", "footer_about_link")
+- Values are the EXACT text strings as they appear in the file (preserve exact characters, don't clean up)
 
-  $("img[alt]").each((i, el) => {
-    const alt = $(el).attr("alt")?.trim();
-    if (alt) strings[`alt_${i}`] = alt;
-  });
+FILE CONTENT:
+\`\`\`
+${content}
+\`\`\`
 
-  const ogTitle = $('meta[property="og:title"]').attr("content")?.trim();
-  if (ogTitle) strings["og_title"] = ogTitle;
-  const ogDesc = $('meta[property="og:description"]').attr("content")?.trim();
-  if (ogDesc) strings["og_description"] = ogDesc;
+Return ONLY valid JSON. No markdown fences, no explanation.`;
 
-  // Twitter card content
-  const twitterTitle = $('meta[name="twitter:title"]').attr("content")?.trim();
-  if (twitterTitle) strings["twitter_title"] = twitterTitle;
-  const twitterDesc = $('meta[name="twitter:description"]').attr("content")?.trim();
-  if (twitterDesc) strings["twitter_description"] = twitterDesc;
+  const result = await callGemini(geminiApiKey, geminiModel, prompt);
 
-  // All visible text nodes — nav links, buttons, badges, footer text
-  $("a, button, span, p, li, td, th, label, figcaption, blockquote, dt, dd").each((i, el) => {
-    if (isInsideSvg($, el)) return;
-    // Only direct text, not nested children's text
-    const directText = $(el).contents().filter(function() { return this.type === "text"; }).text().trim();
-    if (directText && directText.length >= 2 && !isCodeNotText(directText) && !isGenericPlaceholder(directText)) {
-      strings[`txt_${i}`] = directText;
-    }
-  });
+  // Strip markdown fences if present
+  const cleaned = result
+    .replace(/^```(?:json)?\n?/i, "")
+    .replace(/\n?```$/i, "")
+    .trim();
 
-  if (Object.keys(strings).length === 0) return html;
-
-  // Add brand hint as context for Gemini
-  if (brand.brandNames.length > 0) {
-    strings["__brand_context__"] = `BRAND NAMES (do not translate): ${brand.brandNames.join(", ")}`;
-  }
-
-  const translated = await translateObject(strings, sourceLang, locale);
-
-  // Write translations back — only into EXISTING elements
-  if (translated["title"]) $("title").text(translated["title"]);
-  if (translated["description"]) $('meta[name="description"]').attr("content", translated["description"]);
-
-  $("h1, h2, h3").each((i, el) => {
-    if (translated[`h_${i}`] && !isInsideSvg($, el)) $(el).text(translated[`h_${i}`]);
-  });
-
-  $("img[alt]").each((i, el) => {
-    if (translated[`alt_${i}`]) $(el).attr("alt", translated[`alt_${i}`]);
-  });
-
-  if (translated["og_title"]) $('meta[property="og:title"]').attr("content", translated["og_title"]);
-  if (translated["og_description"]) $('meta[property="og:description"]').attr("content", translated["og_description"]);
-  if (translated["twitter_title"]) $('meta[name="twitter:title"]').attr("content", translated["twitter_title"]);
-  if (translated["twitter_description"]) $('meta[name="twitter:description"]').attr("content", translated["twitter_description"]);
-
-  // Write back visible text translations
-  $("a, button, span, p, li, td, th, label, figcaption, blockquote, dt, dd").each((i, el) => {
-    if (isInsideSvg($, el)) return;
-    if (translated[`txt_${i}`]) {
-      // Replace only direct text nodes, preserve child elements
-      $(el).contents().filter(function() { return this.type === "text"; }).each(function() {
-        const original = (this as any).data as string;
-        if (original.trim() && translated[`txt_${i}`]) {
-          (this as any).data = original.replace(original.trim(), translated[`txt_${i}`]);
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (typeof parsed === "object" && parsed !== null) {
+      // Filter out empty strings and very short non-text
+      const filtered: Record<string, string> = {};
+      for (const [key, val] of Object.entries(parsed)) {
+        if (typeof val === "string" && val.trim().length >= 1) {
+          filtered[key] = val;
         }
-      });
-    }
-  });
-
-  // ── Metadata cleanup: html lang, og:locale, stale data-aria-* ───
-  $("html").attr("lang", locale);
-  $('meta[property="og:locale"]').attr("content", locale.replace("-", "_"));
-  // Clean stale data-aria-* attributes from previous locale runs
-  $("[aria-label]").each((_, el) => {
-    const attribs = (el as any).attribs || {};
-    for (const attr of Object.keys(attribs)) {
-      if (attr.startsWith("data-aria-")) $(el).removeAttr(attr);
-    }
-  });
-
-  return $.html();
-}
-
-async function translateHtmlAria(html: string, sourceLang: string, locale: string): Promise<string> {
-  const $ = cheerio.load(html);
-  const strings: Record<string, string> = {};
-
-  $("[aria-label]").each((i, el) => {
-    const val = $(el).attr("aria-label")?.trim();
-    if (val) strings[`aria_${i}`] = val;
-  });
-
-  const srSel = ".sr-only, .visually-hidden, .screen-reader-only, .screen-reader-text";
-  $(srSel).each((i, el) => {
-    const text = $(el).text().trim();
-    if (text) strings[`sr_${i}`] = text;
-  });
-
-  if (Object.keys(strings).length === 0) return html;
-
-  const translated = await translateObject(strings, sourceLang, locale);
-
-  $("[aria-label]").each((i, el) => {
-    if (translated[`aria_${i}`]) {
-      $(el).attr("aria-label", translated[`aria_${i}`]);
-      // Clean stale data-aria-* from previous runs
-      const attribs = (el as any).attribs || {};
-      for (const attr of Object.keys(attribs)) {
-        if (attr.startsWith("data-aria-")) $(el).removeAttr(attr);
       }
+      log.info(`[EXTRACT] ${filePath}: Gemini found ${Object.keys(filtered).length} strings`);
+      return filtered;
     }
-  });
+  } catch (err) {
+    log.warn(`[EXTRACT] ${filePath}: Failed to parse Gemini JSON — ${err instanceof Error ? err.message : String(err)}`);
+    log.warn(`[EXTRACT] Raw response (first 200 chars): ${cleaned.slice(0, 200)}`);
+  }
 
-  $(srSel).each((i, el) => {
-    if (translated[`sr_${i}`]) $(el).text(translated[`sr_${i}`]);
-  });
-
-  return $.html();
-}
-
-// Check if an element is inside an <svg> (don't touch SVG content)
-function isInsideSvg($: ReturnType<typeof cheerio.load>, el: any): boolean {
-  return $(el).closest("svg").length > 0;
+  return {};
 }
 
 
-// ── TSX translations ───────────────────────────────────────────────────
-// For TSX we use regex. Rules:
-//   - Only replace text VALUES, never code/syntax/imports
-//   - Skip SVG content (<svg>...</svg> blocks)
-//   - Skip CSS/style objects
-//   - Preserve brand names
+// ══════════════════════════════════════════════════════════════════════════
+// STEP 2: SDK TRANSLATE — lingo.dev SDK translates the extracted strings
+// ══════════════════════════════════════════════════════════════════════════
+// This is just translateObject() from lingo-client.ts
+// SDK → our /api/process/localize → Gemini with mixed-language-aware prompt
 
-// Regex to find SVG blocks in TSX — we strip these before extracting text
-const SVG_BLOCK_RE = /<svg[\s\S]*?<\/svg>/gi;
 
-// Things that look like text but aren't
-function isCodeNotText(text: string): boolean {
-  const t = text.trim();
-  return (
-    t.startsWith("//") ||
-    t.startsWith("/*") ||
-    t.startsWith("import ") ||
-    t.startsWith("export ") ||
-    t.startsWith("const ") ||
-    t.startsWith("let ") ||
-    t.startsWith("var ") ||
-    t.startsWith("function ") ||
-    t.startsWith("return ") ||
-    t.includes("className") ||
-    t.includes("style=") ||
-    t.includes("onClick") ||
-    t.includes("onChange") ||
-    t.includes("href=") ||
-    t.includes("src=") ||
-    /^[a-z]+:\/\//.test(t) ||      // URLs
-    /^\s*$/.test(t) ||               // whitespace
-    /^[{(]/.test(t) ||               // JSX expressions
-    /^[0-9.,\s$€£¥%]+$/.test(t) ||  // pure numbers/currency
-    /^[a-z_]+$/i.test(t) ||          // single identifier (variable name)
-    t.length < 2                      // too short
-  );
+// ══════════════════════════════════════════════════════════════════════════
+// STEP 3: GEMINI REPLACE — Ask Gemini to apply translations back to the file
+// ══════════════════════════════════════════════════════════════════════════
+
+async function geminiReplaceStrings(
+  originalContent: string,
+  filePath: string,
+  originalStrings: Record<string, string>,
+  translatedStrings: Record<string, string>,
+  targetLocale: string,
+  brand: BrandContext,
+): Promise<string> {
+  const geminiApiKey = process.env.GEMINI_API_KEY;
+  const geminiModel = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  if (!geminiApiKey) return originalContent;
+
+  // Build the translation map: original → translated
+  const translationMap: Record<string, string> = {};
+  for (const key of Object.keys(originalStrings)) {
+    if (translatedStrings[key]) {
+      translationMap[originalStrings[key]] = translatedStrings[key];
+    }
+  }
+
+  if (Object.keys(translationMap).length === 0) return originalContent;
+
+  const brandList = brand.brandNames.length > 0
+    ? `\nBRAND NAMES — keep these EXACTLY as spelled, never translate: ${brand.brandNames.join(", ")}`
+    : "";
+
+  const prompt = `You are a precision file editor for website localization.
+
+TARGET LOCALE: ${targetLocale}
+
+TASK: Apply the translation map below to the file. For each original string → translated string, find and replace it in the file.
+
+TRANSLATION MAP:
+${JSON.stringify(translationMap, null, 2)}
+
+ALSO DO THESE METADATA UPDATES:
+- Set <html lang="..."> to "${targetLocale}"
+- Set og:locale / locale: to "${targetLocale.replace("-", "_")}"
+- Set inLanguage in any JSON-LD to "${targetLocale}"
+- Update any hreflang values (except x-default) to "${targetLocale}"
+- Remove any data-aria-* attributes (stale from previous runs)
+- If any human-visible string in the file is NOT in the target locale and NOT in the translation map, translate it to ${targetLocale} anyway — the output must be 100% in ${targetLocale} (except brand names and code)
+${brandList}
+
+CRITICAL RULES:
+1. ONLY change text strings and metadata values — NEVER modify code structure, imports, JSX syntax, component logic, CSS, class names, or TypeScript types
+2. Preserve ALL formatting: indentation, line breaks, quotes (single vs double), semicolons, commas
+3. Do NOT add or remove any lines of code
+4. Do NOT change any import statements, function signatures, variable declarations, or JSX structure
+5. SVG content (paths, coordinates, viewBox) must stay EXACTLY the same
+6. If a string appears multiple times, translate ALL occurrences
+7. Brand names must stay in their original form: ${brand.brandNames.join(", ") || "none detected"}
+8. Return the COMPLETE file — every single line, not just the changed parts
+
+ORIGINAL FILE (${filePath}):
+\`\`\`
+${originalContent}
+\`\`\`
+
+Return the COMPLETE translated file. No markdown fences, no explanation, no truncation. Every line of the original must appear in your output.`;
+
+  const result = await callGemini(geminiApiKey, geminiModel, prompt);
+
+  // Strip markdown fences if Gemini wraps the output
+  let cleaned = result;
+  if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```(?:tsx|jsx|html|typescript|javascript)?\n?/i, "").replace(/\n?```$/i, "");
+  }
+
+  // Sanity check: the result should be roughly the same size as the original
+  // If it's drastically shorter, Gemini truncated it — reject
+  if (cleaned.length < originalContent.length * 0.5) {
+    log.warn(`[REPLACE] ${filePath}: Gemini output too short (${cleaned.length} vs ${originalContent.length} original) — rejecting`);
+    return originalContent;
+  }
+
+  // Sanity check: result should still contain key code patterns
+  if (originalContent.includes("export") && !cleaned.includes("export")) {
+    log.warn(`[REPLACE] ${filePath}: Gemini removed export statements — rejecting`);
+    return originalContent;
+  }
+
+  log.ok(`[REPLACE] ${filePath}: Applied ${Object.keys(translationMap).length} translations`);
+  return cleaned;
 }
 
-async function translateTsxSeo(content: string, sourceLang: string, locale: string, brand: BrandContext): Promise<string> {
-  const strings: Record<string, string> = {};
 
-  // ── 1. Extract ALL string values from metadata export block ──────────
-  // This catches title, description, OG, Twitter, keywords — everything
-  // in one pass instead of fragile per-field regex
-  const metadataStrings = extractMetadataStrings(content);
-  for (const [key, val] of Object.entries(metadataStrings)) {
-    // For placeholders, replace with brand name instead of skipping
-    if (isGenericPlaceholder(val)) {
-      if (key.includes("title") && brand.appName) {
-        strings[key] = brand.appName;
-      }
-      // Skip placeholder descriptions entirely — Gemini will generate from brand
+// ══════════════════════════════════════════════════════════════════════════
+// MAIN FIXER — orchestrates extract → translate → replace for each file
+// ══════════════════════════════════════════════════════════════════════════
+
+export async function applyFixes(params: FixerParams): Promise<FixResult[]> {
+  const { cloneDir, issues, targetLocales, fixModes } = params;
+
+  const fixResults: FixResult[] = [];
+  const globalLog: string[] = [];
+  const locale = targetLocales[0]; // one locale per PR
+
+  const modeLabel = [fixModes.seo && "SEO", fixModes.aria && "ARIA", fixModes.fullPage && "FULL-PAGE"].filter(Boolean).join("+");
+  globalLog.push(`[FIXER] Starting — ${modeLabel} → ${locale || "none"}`);
+
+  if (!locale) {
+    globalLog.push(`[FIXER] No target locale — nothing to translate`);
+    fixResults.push({ filePath: "__fixer_log__", originalContent: "", newContent: "", issuesFixed: [], log: globalLog });
+    return fixResults;
+  }
+
+  // ── Step 0a: Detect dominant source language (hint for SDK) ─────────
+  const sourceLang = await detectSourceLocale(cloneDir);
+  globalLog.push(`[DETECT] Dominant source language: "${sourceLang}" (Gemini handles mixed languages per-string)`);
+
+  // ── Step 0b: Extract brand context ─────────────────────────────────
+  const brand = await extractBrandContext(cloneDir);
+  globalLog.push(`[BRAND] App name: "${brand.appName}" | Brand names: ${brand.brandNames.join(", ") || "none"}`);
+
+  // ── Step 0c: Discover ALL translatable files ───────────────────────
+  const allFiles = await discoverTranslatableFiles(cloneDir);
+  const issueFiles = new Set(issues.map(i => i.filePath));
+  for (const f of issueFiles) {
+    if (f !== "sitemap.xml") allFiles.add(f);
+  }
+  globalLog.push(`[FIXER] Found ${allFiles.size} translatable files`);
+
+  // ── Process each file with the 3-step pipeline ─────────────────────
+  for (const filePath of allFiles) {
+    if (filePath === "sitemap.xml") continue;
+
+    const fullPath = join(cloneDir, filePath);
+    let content: string;
+    try {
+      content = await readFile(fullPath, "utf-8");
+    } catch {
+      globalLog.push(`[SKIP] ${filePath} — not found`);
       continue;
     }
-    strings[key] = val;
-  }
 
-  // ── 2. JSON-LD / structured data ─────────────────────────────────────
-  const jsonLdMatches = [...content.matchAll(/JSON\.stringify\(\s*(\{[\s\S]*?\})\s*\)/g)];
-  for (let i = 0; i < jsonLdMatches.length; i++) {
+    const originalContent = content;
+    const ext = extname(filePath).toLowerCase();
+    const isHtml = [".html", ".htm", ".php", ".ejs", ".astro", ".vue", ".svelte"].includes(ext);
+    const isTsx = [".tsx", ".jsx"].includes(ext);
+
     try {
-      // Extract string values from JSON-LD-like objects
-      const objStr = jsonLdMatches[i][1];
-      const strValues = [...objStr.matchAll(/:\s*["']([^"']{3,200})["']/g)];
-      for (let j = 0; j < strValues.length; j++) {
-        const val = strValues[j][1].trim();
-        if (val && !val.startsWith("http") && !val.startsWith("@") && !val.includes("schema.org")) {
-          strings[`jsonld_${i}_${j}`] = val;
+      if (isHtml && fixModes.fullPage) {
+        // For HTML full-page, use SDK's localizeHtml (it has a real DOM parser)
+        log.info(`[FULL] ${filePath} → ${locale} (HTML)`);
+        content = await translateHtml(content, sourceLang, locale);
+        log.ok(`[FULL] ✓ ${filePath}`);
+      } else if (isTsx || isHtml) {
+        // ── THE THREE-STEP PIPELINE ───────────────────────────────
+
+        // Step 1: Gemini extracts all translatable strings
+        log.info(`[EXTRACT] ${filePath} — extracting strings with Gemini`);
+        const extracted = await geminiExtractStrings(content, filePath, brand);
+
+        if (Object.keys(extracted).length === 0) {
+          globalLog.push(`[SKIP] ${filePath} — no translatable strings found`);
+          continue;
         }
-      }
-    } catch {}
-  }
-  // Also check for inline ld+json strings assigned to variables
-  const ldJsonVarMatches = [...content.matchAll(/ld\+json[\s\S]*?(\{[\s\S]*?\})\s*(?:<\/script>|`)/g)];
-  for (let i = 0; i < ldJsonVarMatches.length; i++) {
-    try {
-      const strValues = [...ldJsonVarMatches[i][1].matchAll(/:\s*["']([^"']{3,200})["']/g)];
-      for (let j = 0; j < strValues.length; j++) {
-        const val = strValues[j][1].trim();
-        if (val && !val.startsWith("http") && !val.startsWith("@") && !val.includes("schema.org") && !/^[a-z]{2}(-[A-Z]{2})?$/.test(val)) {
-          strings[`ld_${i}_${j}`] = val;
+
+        // Add brand context for the SDK translation step
+        if (brand.brandNames.length > 0) {
+          extracted["__brand_context__"] = `BRAND NAMES (do not translate): ${brand.brandNames.join(", ")}`;
         }
+
+        // Step 2: SDK translates the strings (lingo.dev SDK → our API → Gemini)
+        log.info(`[TRANSLATE] ${filePath} — translating ${Object.keys(extracted).length} strings via SDK`);
+        const translated = await translateObject(extracted, sourceLang, locale);
+
+        // Step 3: Gemini applies translations back to the file
+        log.info(`[REPLACE] ${filePath} — applying translations with Gemini`);
+        content = await geminiReplaceStrings(
+          content, filePath, extracted, translated, locale, brand
+        );
+
+        log.ok(`[DONE] ✓ ${filePath} → ${locale}`);
       }
-    } catch {}
-  }
 
-  // ── 3. Headings in JSX — NOT inside SVG ──────────────────────────────
-  const contentNoSvg = content.replace(SVG_BLOCK_RE, (m) => " ".repeat(m.length));
-  const headingMatches = [...contentNoSvg.matchAll(/<h[1-6][^>]*>([^<{]{2,200})<\/h[1-6]>/g)];
-  headingMatches.forEach((m, i) => {
-    const text = m[1].trim();
-    if (text && !isCodeNotText(text)) strings[`h_${i}`] = text;
-  });
-
-  // ── 4. Alt text ──────────────────────────────────────────────────────
-  const altMatches = [...content.matchAll(/alt=["']([^"']{2,})["']/g)];
-  altMatches.forEach((m, i) => { strings[`alt_${i}`] = m[1]; });
-
-  // ── 5. ALL visible text >text< — nav, buttons, badges, footer ────────
-  const textMatches = [...contentNoSvg.matchAll(/>([^<>{]{2,300})/g)];
-  textMatches.forEach((m, i) => {
-    const text = m[1].trim();
-    if (text && !isCodeNotText(text) && !isGenericPlaceholder(text) && text.length >= 2) {
-      strings[`txt_${i}`] = text;
-    }
-  });
-
-  if (Object.keys(strings).length === 0) return content;
-
-  // Add brand context
-  if (brand.brandNames.length > 0) {
-    strings["__brand_context__"] = `BRAND NAMES (do not translate): ${brand.brandNames.join(", ")}`;
-  }
-
-  const translated = await translateObject(strings, sourceLang, locale);
-  let result = content;
-
-  // ── Replace metadata strings ──────────────────────────────────────────
-  for (const [key, originalVal] of Object.entries(metadataStrings)) {
-    const translatedVal = translated[key];
-    if (!translatedVal) continue;
-    // For placeholders that were replaced with brand name, the original is the placeholder
-    const searchVal = isGenericPlaceholder(originalVal) ? originalVal : originalVal;
-    // Escape regex special chars in the search value
-    const escaped = searchVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(["'])${escaped}\\1`);
-    const match = result.match(regex);
-    if (match) {
-      result = result.replace(match[0], `${match[1]}${translatedVal}${match[1]}`);
-    }
-  }
-
-  // ── Replace JSON-LD strings ───────────────────────────────────────────
-  for (const [key, originalVal] of Object.entries(strings)) {
-    if (!key.startsWith("jsonld_") && !key.startsWith("ld_")) continue;
-    if (!translated[key]) continue;
-    const escaped = originalVal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const regex = new RegExp(`(["'])${escaped}\\1`);
-    const match = result.match(regex);
-    if (match) {
-      result = result.replace(match[0], `${match[1]}${translated[key]}${match[1]}`);
-    }
-  }
-
-  // ── Replace headings (reverse order for position safety) ──────────────
-  for (let i = headingMatches.length - 1; i >= 0; i--) {
-    if (translated[`h_${i}`]) {
-      const m = headingMatches[i];
-      result = result.replace(m[0], m[0].replace(m[1], translated[`h_${i}`]));
-    }
-  }
-
-  // ── Replace alt text ──────────────────────────────────────────────────
-  for (let i = altMatches.length - 1; i >= 0; i--) {
-    if (translated[`alt_${i}`]) {
-      result = result.replace(altMatches[i][0], altMatches[i][0].replace(altMatches[i][1], translated[`alt_${i}`]));
-    }
-  }
-
-  // ── Replace visible text — offset-indexed to handle duplicates ────────
-  const replacedOffsets = new Set<number>();
-  for (let i = textMatches.length - 1; i >= 0; i--) {
-    const key = `txt_${i}`;
-    if (!translated[key] || !strings[key]) continue;
-    const m = textMatches[i];
-    const offset = m.index!;
-    if (replacedOffsets.has(offset)) continue;
-    replacedOffsets.add(offset);
-    const originalSnippet = `>${m[1]}`;
-    const idx = content.indexOf(originalSnippet, offset > 10 ? offset - 10 : 0);
-    if (idx >= 0) {
-      const before = result.slice(0, idx);
-      const after = result.slice(idx + originalSnippet.length);
-      result = before + `>${m[1].replace(m[1].trim(), translated[key])}` + after;
-    }
-  }
-
-  // ── Update html lang ──────────────────────────────────────────────────
-  result = result.replace(/<html([^>]*)\slang=["'][^"']*["']/, `<html$1 lang="${locale}"`);
-
-  // ── Update og:locale and inLanguage in JSON-LD ────────────────────────
-  result = result.replace(/(locale:\s*["'])[^"']*(["'])/, `$1${locale.replace("-", "_")}$2`);
-  result = result.replace(/(inLanguage["']:\s*["'])[^"']*(["'])/, `$1${locale}$2`);
-
-  // ── Update hreflang references ────────────────────────────────────────
-  // Replace old locale references in hreflang with target locale
-  result = result.replace(/(hreflang=["'])[^"']*(["'])/g, (match, pre, post) => {
-    // Keep x-default as-is
-    if (match.includes("x-default")) return match;
-    return `${pre}${locale}${post}`;
-  });
-  // Update locale path segments (e.g., "/es" → "/zh-Hant")
-  result = result.replace(/(href=["'][^"']*\/)([a-z]{2}(?:-[A-Za-z]+)?)(\/[^"']*["'])/g, (match, pre, oldLocale, post) => {
-    // Only replace if it looks like a locale path segment
-    if (/^[a-z]{2}(-[A-Za-z]{2,})?$/.test(oldLocale) && oldLocale !== "en") {
-      return `${pre}${locale}${post}`;
-    }
-    return match;
-  });
-
-  // ── Clean stale data-aria-* ───────────────────────────────────────────
-  result = result.replace(/\s+data-aria-[a-z]{2,5}=["'][^"']*["']/g, "");
-
-  return result;
-}
-
-// Extract ALL string values from a Next.js/TSX metadata export block.
-// Handles: title, description, openGraph.title, openGraph.description,
-// twitter.title, twitter.description, keywords, etc.
-function extractMetadataStrings(content: string): Record<string, string> {
-  const strings: Record<string, string> = {};
-
-  // Find the metadata export block: export const metadata = { ... }
-  // Use bracket counting to find the end of the object
-  const metaStart = content.match(/export\s+const\s+metadata[\s:][^=]*=\s*\{/);
-  if (!metaStart || metaStart.index === undefined) return strings;
-
-  let depth = 0;
-  let blockStart = metaStart.index + metaStart[0].length - 1; // at the opening {
-  let blockEnd = blockStart;
-  for (let i = blockStart; i < content.length; i++) {
-    if (content[i] === "{") depth++;
-    if (content[i] === "}") depth--;
-    if (depth === 0) { blockEnd = i + 1; break; }
-  }
-
-  const metaBlock = content.slice(blockStart, blockEnd);
-
-  // Extract all string values with their key path
-  // Simple approach: find all key: "value" pairs
-  const pairs = [...metaBlock.matchAll(/(\w+):\s*["']([^"']+)["']/g)];
-  for (const pair of pairs) {
-    const key = pair[1];
-    const val = pair[2];
-
-    // Skip non-translatable keys
-    if (["type", "card", "site", "creator", "url", "width", "height",
-         "siteName", "locale", "lang", "charset", "viewport", "themeColor",
-         "manifest", "icon", "apple", "canonical"].includes(key)) continue;
-    // Skip URLs and locale codes
-    if (val.startsWith("http") || val.startsWith("/") || /^[a-z]{2}[_-][A-Z]{2}$/.test(val)) continue;
-
-    strings[`meta_${key}`] = val;
-  }
-
-  return strings;
-}
-
-async function translateTsxAria(content: string, sourceLang: string, locale: string): Promise<string> {
-  const strings: Record<string, string> = {};
-
-  const ariaMatches = [...content.matchAll(/aria-label=["']([^"']+)["']/g)];
-  ariaMatches.forEach((m, i) => { strings[`aria_${i}`] = m[1]; });
-
-  const srMatches = [...content.matchAll(/className=["'][^"']*sr-only[^"']*["'][^>]*>([^<]{1,200})</g)];
-  srMatches.forEach((m, i) => { if (m[1].trim()) strings[`sr_${i}`] = m[1].trim(); });
-
-  if (Object.keys(strings).length === 0) return content;
-
-  const translated = await translateObject(strings, sourceLang, locale);
-  let result = content;
-
-  for (let i = ariaMatches.length - 1; i >= 0; i--) {
-    if (translated[`aria_${i}`]) {
-      const m = ariaMatches[i];
-      result = result.replace(m[0], m[0].replace(m[1], translated[`aria_${i}`]));
-    }
-  }
-
-  for (let i = srMatches.length - 1; i >= 0; i--) {
-    if (translated[`sr_${i}`]) {
-      const m = srMatches[i];
-      result = result.replace(m[0], m[0].replace(m[1], translated[`sr_${i}`]));
-    }
-  }
-
-  // Clean stale data-aria-* attributes
-  result = result.replace(/\s+data-aria-[a-z]{2,5}=["'][^"']*["']/g, "");
-
-  return result;
-}
-
-async function translateTsxContent(content: string, sourceLang: string, locale: string, brand: BrandContext): Promise<string> {
-  const strings: Record<string, string> = {};
-
-  // Strip SVG blocks from analysis (preserve positions for replacement later)
-  const contentNoSvg = content.replace(SVG_BLOCK_RE, (m) => " ".repeat(m.length));
-
-  // Text between JSX tags: >Some text< — but NOT inside SVG
-  const textMatches = [...contentNoSvg.matchAll(/>([^<>{]{3,300})/g)];
-  textMatches.forEach((m, i) => {
-    const text = m[1].trim();
-    if (text && !isCodeNotText(text)) {
-      strings[`t_${i}`] = text;
-    }
-  });
-
-  // Metadata (only real content, not placeholders)
-  const titleMatch = content.match(/title:\s*["']([^"']+)["']/);
-  if (titleMatch && !isGenericPlaceholder(titleMatch[1])) {
-    strings["title"] = titleMatch[1];
-  }
-  const descMatch = content.match(/description:\s*["']([^"']+)["']/);
-  if (descMatch && !isGenericPlaceholder(descMatch[1])) {
-    strings["description"] = descMatch[1];
-  }
-
-  // Alt text
-  const altMatches = [...content.matchAll(/alt=["']([^"']{2,})["']/g)];
-  altMatches.forEach((m, i) => { strings[`alt_${i}`] = m[1]; });
-
-  // Aria labels
-  const ariaMatches = [...content.matchAll(/aria-label=["']([^"']+)["']/g)];
-  ariaMatches.forEach((m, i) => { strings[`aria_${i}`] = m[1]; });
-
-  if (Object.keys(strings).length === 0) return content;
-
-  // Add brand context
-  if (brand.brandNames.length > 0) {
-    strings["__brand_context__"] = `BRAND NAMES (do not translate): ${brand.brandNames.join(", ")}`;
-  }
-
-  log.info(`[FULL] Extracted ${Object.keys(strings).length} strings from TSX (${brand.brandNames.length} brand names protected)`);
-  const translated = await translateObject(strings, sourceLang, locale);
-
-  let result = content;
-
-  // Replace text matches — reverse order for position safety
-  // IMPORTANT: use the ORIGINAL content positions, but only replace if the
-  // text exists in the original (not in SVG-stripped version only)
-  for (let i = textMatches.length - 1; i >= 0; i--) {
-    const key = `t_${i}`;
-    if (translated[key] && strings[key]) {
-      const m = textMatches[i];
-      const originalSnippet = `>${m[1]}`;
-      // Only replace if this exact text exists in the real content (not inside SVG)
-      if (content.includes(originalSnippet)) {
-        result = result.replace(originalSnippet, `>${m[1].replace(m[1].trim(), translated[key])}`);
+      // Write if changed
+      if (content !== originalContent) {
+        await writeFile(fullPath, content, "utf-8");
+        const mode = fixModes.fullPage ? "full-page" : [fixModes.seo && "seo", fixModes.aria && "aria"].filter(Boolean).join("+");
+        fixResults.push({
+          filePath,
+          originalContent,
+          newContent: content,
+          issuesFixed: [mode || "translate"],
+          log: [`${filePath} — ${mode} → ${locale}`],
+        });
+        globalLog.push(`[WRITE] ✓ ${filePath}`);
       }
+    } catch (err) {
+      log.err(`[FAIL] ✗ ${filePath}`, err);
+      globalLog.push(`[FAIL] ✗ ${filePath}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
-  // Replace metadata
-  if (translated["title"] && titleMatch && !isGenericPlaceholder(titleMatch[1])) {
-    result = result.replace(titleMatch[0], titleMatch[0].replace(titleMatch[1], translated["title"]));
-  }
-  if (translated["description"] && descMatch && !isGenericPlaceholder(descMatch[1])) {
-    result = result.replace(descMatch[0], descMatch[0].replace(descMatch[1], translated["description"]));
-  }
+  // ── Done ────────────────────────────────────────────────────────────
+  globalLog.push(`[FIXER] Done — ${fixResults.length} files modified → ${locale}`);
 
-  // Replace alt text
-  for (let i = altMatches.length - 1; i >= 0; i--) {
-    if (translated[`alt_${i}`]) {
-      result = result.replace(altMatches[i][0], altMatches[i][0].replace(altMatches[i][1], translated[`alt_${i}`]));
-    }
-  }
-
-  // Replace aria-labels
-  for (let i = ariaMatches.length - 1; i >= 0; i--) {
-    if (translated[`aria_${i}`]) {
-      result = result.replace(ariaMatches[i][0], ariaMatches[i][0].replace(ariaMatches[i][1], translated[`aria_${i}`]));
-    }
+  if (fixResults.length > 0) {
+    fixResults[0].log = [...globalLog, ...(fixResults[0].log || [])];
+  } else {
+    fixResults.push({
+      filePath: "__fixer_log__",
+      originalContent: "",
+      newContent: "",
+      issuesFixed: [],
+      log: globalLog,
+    });
   }
 
-  // Metadata cleanup
-  result = result.replace(/<html([^>]*)\slang=["'][^"']*["']/, `<html$1 lang="${locale}"`);
-  result = result.replace(/(locale:\s*["'])[^"']*(["'])/, `$1${locale.replace("-", "_")}$2`);
-  // Clean stale data-aria-* from previous locale runs
-  result = result.replace(/\s+data-aria-[a-z]{2,5}=["'][^"']*["']/g, "");
-
-  return result;
+  return fixResults;
 }
