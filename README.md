@@ -1,5 +1,7 @@
 # LingoSEO
 
+### Rank higher in every market. Be accessible to every visually impaired user, in their language.
+
 **Multilingual SEO + Accessibility — powered by [lingo.dev](https://lingo.dev)**
 
 > Point it at any GitHub repo. It finds every broken SEO tag and accessibility issue across 25+ languages, fixes them with AI, and opens a pull request. You just merge.
