@@ -1,0 +1,71 @@
+1
+00:00:00,000 --> 00:00:08,000
+So, so most of the websites are built in English and they stay that way. The page titles, the descriptions, even the hidden labels.
+
+2
+00:00:08,000 --> 00:00:18,000
+Blind users rely to navigate, everything is, you know, like, in one language English and lingo dev doesn't really you know like translate those.
+
+3
+00:00:18,000 --> 00:00:27,000
+Umm, all English, so when someone in Japan or Germany, Brazil visits, Google doesn't rank it. It's the same with the search engine optimization.
+
+4
+00:00:27,000 --> 00:00:37,000
+A person might search something in English and for the same product, uhh, the person. A person might search something else in Mexico and the copy feels foreign.
+
+5
+00:00:37,000 --> 00:00:48,000
+Umm, 253 million people are visually impaired and billions search in other languages. So, this doesn't really, you know, like, cover those people.
+
+6
+00:00:48,000 --> 00:00:56,000
+The lingo deck and most developers don't even know this site is broken all this time. That's what lingo SEO features.
+
+7
+00:00:56,000 --> 00:01:10,000
+Let me, let me show you. So, I'll connect with GitHub now. Umm, I was already signed in so, no more creds.
+
+8
+00:01:10,000 --> 00:01:24,000
+So, here's the repository. I'll go to the Rovo which is lingo where it is. Mmm, yeah. Ah, let me see.
+
+9
+00:01:24,000 --> 00:01:35,000
+Ah. This here, one branch already exists, I guess. One branch already. Ah, that's final, ah, one exists already. So, I just.
+
+10
+00:01:35,000 --> 00:01:49,000
+Just put this, and we have seo metadat and ariascreen reader like this, or like even translate everything, the whole page with SEO and the audio labels, and now all you have to do is scan for SEO issues.
+
+11
+00:01:49,000 --> 00:02:08,000
+Please. So, here is the English version of the website, it's just the best website I made, and here is, like, you know, it's great that I can also say it's made, like, this many officials are identified, identify audio buttons, which needs to be translated, it's alright.
+
+12
+00:02:08,000 --> 00:02:22,000
+If you have a SEO, it'll translate that to the culturally accurate SEO, if you don't have any SEO, it'll modify the whole, you know, code-based for adding SEO for that particular, or targeted language.
+
+13
+00:02:22,000 --> 00:02:32,000
+So, the target language here was, That's funny, I'll again, I'm, I'm sorry, I forgot to change it, so, yeah, that's funny, I'll again, and, here you see it.
+
+14
+00:02:32,000 --> 00:02:49,000
+So, now what we'll do is translate and create here. So, the PR request is created, let's see the PR, pull request, and the file stream.
+
+15
+00:02:49,000 --> 00:03:03,000
+This is what, you know, like, lingo SEO comments listed. So, files. Change for a one. Change everything for a spaniel, like, everything.
+
+16
+00:03:03,000 --> 00:03:30,000
+So, yeah, let's mojit. it. After merging, let's go here. And then, pull the reset changes. Yeah, good at this. It doesn't change the brand name at all.
+
+17
+00:03:30,000 --> 00:03:41,000
+It doesn't change anything, which is like, you know, or it just doesn't change the original code base. It changes what is necessary for people from that particular region to understand.
+
+18
+00:03:41,000 --> 00:03:42,000
+And, aria labels are also changed. Umm, the code, you know.
