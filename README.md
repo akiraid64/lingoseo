@@ -1,8 +1,8 @@
 # LingoSEO
 
-**Multilingual SEO + Accessibility Intelligence — powered by [lingo.dev](https://lingo.dev)**
+**Multilingual SEO + Accessibility — powered by [lingo.dev](https://lingo.dev)**
 
-> Scan any GitHub repo for SEO, ARIA, and cultural adaptation issues across 25+ languages. Fix them with AI. Push a PR. You just merge.
+> Point it at any GitHub repo. It finds every broken SEO tag and accessibility issue across 25+ languages, fixes them with AI, and opens a pull request. You just merge.
 
 [![Built with lingo.dev SDK](https://img.shields.io/badge/built%20with-lingo.dev%20SDK-blue)](https://lingo.dev)
 [![Next.js 16](https://img.shields.io/badge/Next.js-16-black)](https://nextjs.org)
@@ -12,43 +12,41 @@
 
 ## The Problem
 
-Your website ranks #1 in English. But in Spanish, Japanese, or Arabic — it's invisible to search engines, broken for blind users, and culturally wrong for the market you're trying to reach.
+Your website ranks #1 in English. In Spanish, Japanese, or Arabic — it's invisible to search engines, broken for blind users, and culturally off for the market you're trying to reach.
 
-Most developers ship apps with:
-- `<title>My Next.js App</title>` — a placeholder Google indexes as your brand
-- Zero `hreflang` tags — Google serves your Spanish users the English page
-- `aria-label="Submit form"` — a blind Japanese user hears English in the middle of a Japanese screen reader session
+Most developers ship apps with stuff like this still in the code:
+
+- `<title>My Next.js App</title>` — that placeholder is what Google indexes as your brand name
+- No `hreflang` tags *(the tags that tell Google "show this page to Spanish speakers, not the English version")* — so Google serves your Mexican users the English page
+- `aria-label="Submit form"` *(aria-labels are the hidden text that screen readers read aloud to blind users)* — a blind Japanese user hears English in the middle of a Japanese screen reader session
 - Meta descriptions in English on a page that's supposed to be in Korean
-- JSON-LD structured data that tells search engines the wrong language
-- "Discover more →" word-for-word translated — not what Germans actually type into Google
+- JSON-LD *(hidden structured data that tells search engines what your page is about)* set to the wrong language
 
-But broken tags are only half the problem. Even when developers do translate, they translate **literally** — not culturally, and not accessibly:
+That's just the broken tags. Even when developers *do* translate, they translate literally — which is a different problem.
 
-**For blind and visually impaired users:**
-- A screen reader navigating a Japanese page hits `aria-label="Close dialog"` — and reads it out in English, mid-sentence, breaking the entire audio experience
-- `sr-only` text that says "Loading spinner" in English while the rest of the page is in Arabic
-- Icon buttons with no label at all — a blind user hears "button button button" with no idea what each does
-- Decorative emoji left exposed — a Korean screen reader spells out "SPARKLES" in English between Korean sentences
+**What literally-translated websites look like for blind users:**
 
-These aren't edge cases. **253 million people worldwide are visually impaired.** Every untranslated aria-label locks them out of your page in their own language.
+A screen reader navigating a Japanese page hits `aria-label="Close dialog"` and reads it out in English, mid-sentence. The rest of the page is Japanese. The button label isn't. That's not a minor glitch — it's the equivalent of a foreign-language pop-up appearing in the middle of an audiobook.
 
-**For search engines and real users:**
-- A Mexican SaaS landing page that sounds like it was written in Madrid
-- A Japanese pricing page with English-level bluntness (Japanese copy is softer, more indirect)
-- A German CTA that says "Discover More" when the high-volume search term is "Jetzt entdecken"
-- An Arabic page with LTR assumptions baked into every meta description
+There's also hidden text called `sr-only` *(short for "screen reader only" — text that's invisible on screen but read aloud)* that developers often forget to translate. So blind Arabic users hear English labels for buttons their sighted counterparts would never notice.
 
-**Translation is not localization.** What ranks in São Paulo is not what ranks in Lisbon. What a blind Korean user expects to hear from a screen reader is not a Korean pronunciation of English.
+And emoji. Decorative emoji left without `aria-hidden="true"` get spelled out by screen readers: a Korean page says "저희 서비스를 SPARKLES 이용해 보세요" — "SPARKLES" pronounced in English, mid-sentence.
 
-LingoSEO uses **Gemini with search grounding** to go beyond word-for-word translation — pulling real search trends per locale so every title, description, and heading targets the keywords people in that market actually type. ARIA strings get their own prompt: screen-reader-native copy written for ears, not eyes. And cultural adaptation handles tone, formality, and vocabulary per locale — so the output is a marketing-ready, fully accessible website, not just a translated one.
+**253 million people worldwide are visually impaired.** Every untranslated accessibility label locks them out of your page in their own language.
 
-**Every untranslated meta tag is a ranking you're losing. Every untranslated aria-label is a blind user you're excluding.** And manually auditing SEO + accessibility + cultural fit across 20+ languages? Nobody does it. So the bugs ship.
+**What literally-translated websites look like for real users:**
+
+A Mexican SaaS page that sounds like it was written in Madrid. A Japanese pricing page that's too blunt (Japanese copy is softer). A German CTA that says "Discover More" when the actual high-volume German search term is "Jetzt entdecken." Translation is not localization. What ranks in São Paulo is not what ranks in Lisbon.
+
+LingoSEO uses Gemini to pull real search trends per locale — so titles and descriptions target what people in that market actually type into Google, not just English copy run through a translator. Every accessibility label gets its own prompt: written for ears, not eyes. Formal where formal is expected. Warm where warm is expected.
+
+**Every untranslated meta tag is a ranking you're losing. Every untranslated aria-label is a blind user you're excluding.** Nobody audits this stuff across 20+ languages manually. So the bugs ship.
+
+---
 
 ## The Solution
 
-LingoSEO connects to your GitHub repo, runs a 13-point SEO + ARIA scan on every HTML/JSX/TSX file, then uses the **lingo.dev SDK** + **Google Gemini** to fix everything with market-aware, culturally-adapted, screen-reader-ready translations — and opens a pull request. You review the diff and merge.
-
-One click. Every language. Every file. Every meta tag, aria-label, JSON-LD field, and cultural nuance.
+LingoSEO connects to your GitHub repo, runs a 13-point scan on every HTML/JSX/TSX file, then uses the **lingo.dev SDK** + **Google Gemini** to fix everything — and opens a pull request. You review the diff and merge.
 
 ![LingoSEO Pipeline — Extract, Translate with lingo.dev SDK, Replace](./public/pipeline.png)
 
@@ -56,17 +54,23 @@ One click. Every language. Every file. Every meta tag, aria-label, JSON-LD field
 
 ## How It Works
 
-### Why lingo.dev SDK Is the Engine, Not a Wrapper
+### The three-step pipeline
 
-The lingo.dev SDK has a feature most people overlook: **`apiUrl`**. Point it at your own server and the SDK routes every translation call through your endpoint instead of their default engine.
+Most localization tools use pattern matching *(regex — think "find all text that looks like a page title")* to extract strings from files. It misses about 35% of translatable content. Nav links, pricing badges, footer text, screen-reader labels — all invisible to it.
 
-This is what makes LingoSEO possible. The SDK does things that are genuinely hard to replicate:
-- **DOM-aware HTML translation** — `localizeHtml()` parses the actual DOM tree, extracts text nodes, translates them, and reconstructs markup without breaking a single tag
-- **Object structure preservation** — `localizeObject()` traverses nested JSON, translates values, returns the exact same shape
-- **Batching and chunking** — large string sets are automatically split into safe batch sizes
-- **BCP-47 locale validation** — rejects malformed locale codes before they corrupt your `hreflang` tags
+LingoSEO doesn't use pattern matching for this. Instead:
 
-I own the `apiUrl` endpoint. That's where I inject what generic translation can't do:
+| Step | Who Does It | What Happens |
+|------|-------------|-------------|
+| **① Extract** | Gemini | Reads the entire file like a human. Pulls out every translatable string — titles, descriptions, button labels, aria-labels, JSON-LD, pricing text, footer links, everything — as a JSON object. |
+| **② Translate** | **lingo.dev SDK** | Sends that JSON through the lingo.dev SDK, which routes it to a custom endpoint. The endpoint feeds different strings to different Gemini prompts: SEO copy gets search-intent instructions, accessibility labels get spoken-language instructions, everything else gets cultural adaptation. |
+| **③ Replace** | Gemini | Takes the original file and the translation map. Swaps every string in-place. Updates the language tags, adds hreflang alternates *(links that tell Google which version of the page to show to which country)*, keeps the file the same length. Returns the complete translated file. |
+
+### Why lingo.dev SDK sits in the middle
+
+The lingo.dev SDK has a feature called `apiUrl`. Point it at your own server and every translation call goes through your endpoint instead of theirs.
+
+That's how LingoSEO works. The SDK handles the hard infrastructure stuff — parsing HTML without breaking it, splitting large translation jobs into safe batches, validating locale codes. I handle what generic translation can't: context.
 
 ```
 standard lingo.dev:  strings → lingo.dev engine → translated strings
@@ -89,213 +93,117 @@ LingoSEO:            strings → lingo.dev SDK → /api/process/localize → Gem
                                formality, and vocabulary
                                for {locale} — not a literal
                                translation, a native one"
-                                         │
-                                         ▼
-                              + Mixed-language detection per string
-                              + Brand name protection from package.json
 ```
 
-The split is clean: **lingo.dev SDK owns the transport and structure. I own the SEO, ARIA, and cultural intelligence.**
+**lingo.dev SDK owns the transport. I own the context.**
 
-Traditional localization tools use regex to find strings. **Regex misses ~35% of translatable content** — proven across 6 test runs. Nav links, pricing badges, JSON-LD descriptions, footer headers, sr-only text — all invisible to pattern matching. The three-step pipeline replaces regex entirely:
-
-| Step | Engine | What It Does |
-|------|--------|-------------|
-| **① EXTRACT** | Gemini | Reads the entire file. Returns every translatable string as a JSON map — metadata, headings, nav labels, aria-labels, JSON-LD, pricing text, footer links, everything. Zero regex. |
-| **② TRANSLATE** | **lingo.dev SDK** | `localizeObject()` routes through `/api/process/localize`. SDK handles batching, chunking, locale validation. The endpoint routes SEO strings to SEO-optimized Gemini prompts, ARIA strings to accessibility-optimized prompts, general strings to cultural adaptation prompts. |
-| **③ REPLACE** | Gemini | Takes the original file + translation map. Replaces every string in-place. Updates `<html lang>`, `og:locale`, `inLanguage`, adds `hreflang` alternates. Returns the complete file, same line count. |
-
----
-
-## How I Use lingo.dev
-
-LingoSEO is built on top of the [lingo.dev SDK](https://lingo.dev/en/sdk) using the **custom engine** pattern:
-
-```typescript
-// lib/translation/lingo-client.ts
-import { LingoDotDevEngine } from "lingo.dev/sdk";
-
-const engine = new LingoDotDevEngine({
-  apiKey: "lingoseo-engine",
-  apiUrl: `${baseUrl}/api`,  // SDK calls {apiUrl}/process/localize
-});
-
-// The SDK handles batching, chunking, HTML parsing, object traversal.
-// My server handles the brain: Gemini with SEO + ARIA + cultural context.
-
-export async function translateObject(obj, sourceLocale, targetLocale) {
-  return engine.localizeObject(obj, { sourceLocale, targetLocale });
-}
-
-export async function translateHtml(html, sourceLocale, targetLocale) {
-  return engine.localizeHtml(html, { sourceLocale, targetLocale });
-}
-```
+### What happens inside the translation endpoint
 
 When the SDK calls `/api/process/localize`, LingoSEO:
 
-1. **Auto-detects content type** from the keys — SEO metadata, ARIA labels, or general content — and routes to the right Gemini prompt
-2. **SEO context** — titles get "translate to what people ACTUALLY SEARCH for in {locale}, not a literal translation"; descriptions get character-count constraints (150-160); headings get keyword-density awareness
-3. **ARIA context** — aria-labels and sr-only text get "write as natural spoken language a blind {locale} user expects to hear — native-sounding, not translated"; because a screen reader reading "Submit form" in English to a Japanese user breaks the entire accessibility contract
-4. **Cultural context** — general strings get "use your cultural knowledge — you decide the right tone, formality, and vocabulary for {locale}"; casual English copy becomes appropriately formal German or appropriately warm Spanish
-5. **Handles mixed languages** — after multiple translation passes, a file might contain 3-5 languages from incomplete previous runs; the prompt detects each string's language individually and translates only the non-target strings
-6. **Protects brand names** — extracted from `package.json` (the only source that's never translated), passed as context so Gemini never touches them
+1. Figures out what type of string it's looking at — SEO metadata, accessibility label, or general content
+2. **SEO strings** get: "translate to what people actually search for in {locale}" — with character limits (50-60 for titles, 150-160 for descriptions)
+3. **Accessibility labels** get: "write as natural spoken language a blind {locale} user expects to hear" — because translating "Submit" to Japanese isn't the same as writing what a Japanese screen reader user expects to hear
+4. **General content** gets: cultural adaptation — right tone, right formality, right vocabulary for the locale
+5. If a file has 3 languages mixed in from previous botched translation runs, it detects each string's language individually and only translates the ones that aren't already in the target language
+6. Brand names are extracted from `package.json` *(your project's config file, which is never translated)* and passed as context so Gemini never touches them
 
-### SDK Methods Used
+### SDK methods used
 
-| Method | Where | Purpose |
-|--------|-------|---------|
-| `localizeObject()` | Step 2 of pipeline | Translate extracted string maps: SEO metadata, ARIA labels, visible text — routed to the right context prompt |
-| `localizeHtml()` | Full-page mode | Translate entire HTML documents while preserving markup; SDK's DOM parser handles tag reconstruction |
-| `localizeText()` | Standalone text | Individual string translation when needed |
-| `batchLocalizeText()` | Multi-locale workflows | Translate one string to multiple locales at once |
+| Method | What it does |
+|--------|-------------|
+| `localizeObject()` | Translates a set of key-value string pairs while keeping the structure intact — used for SEO metadata, aria-labels, visible text |
+| `localizeHtml()` | Translates a full HTML page without breaking any tags — the SDK's DOM parser handles reassembly |
+| `localizeText()` | Single string translation |
+| `batchLocalizeText()` | One string translated into multiple languages at once |
 
 ---
 
-## What It Scans (13 Issue Types)
+## What It Scans
 
-### SEO Issues
-| Issue | Severity | What LingoSEO Does |
+### SEO issues
+
+| Issue | Severity | What LingoSEO does |
 |-------|----------|-------------------|
-| Missing `<title>` | Critical | Generates locale-optimized title (50-60 chars, high search volume keywords for that market) |
-| Missing meta description | Critical | Writes 150-160 char description targeting actual search terms in the locale |
-| Missing Open Graph tags | Warning | Adds `og:title`, `og:description`, `og:locale` for social sharing |
-| Missing Twitter Card | Warning | Adds `twitter:card`, `twitter:title`, `twitter:description` |
-| Missing hreflang | Critical | Adds `<link rel="alternate" hreflang="{locale}">` with self-referencing + bidirectional refs |
-| Missing canonical | Warning | Adds self-referencing canonical URL |
-| Missing viewport | Warning | Adds mobile-first viewport meta tag |
-| Unoptimized headings | Warning | Ensures single H1 with locale-relevant keywords |
-| Invalid JSON-LD | Warning | Translates `name`, `description`, updates `inLanguage`, flags deprecated schema types |
-| Missing sitemap locales | Info | Detects sitemap without locale-specific URLs |
+| Missing page title | Critical | Writes a locale-optimized title using real search volume keywords for that market (50-60 chars) |
+| Missing meta description | Critical | Writes a 150-160 char description targeting what people actually search for in that locale |
+| Missing Open Graph tags | Warning | Adds the tags social platforms use when someone shares your link |
+| Missing Twitter Card tags | Warning | Same, but specifically for Twitter/X previews |
+| Missing hreflang | Critical | Adds the tags that tell Google which version of your page to show to which country |
+| Missing canonical tag | Warning | Adds the tag that prevents Google from treating duplicate pages as separate results |
+| Missing mobile viewport | Warning | Adds the tag Google requires for mobile-first indexing |
+| Unoptimized headings | Warning | Fixes missing or duplicate H1 tags |
+| Invalid structured data | Warning | Fixes the hidden JSON that describes your page to search engines |
+| Missing sitemap locales | Info | Flags sitemaps that don't include locale-specific URLs |
 
-### ARIA & Accessibility Issues
-| Issue | Severity | What LingoSEO Does |
+### Accessibility issues
+
+| Issue | Severity | What LingoSEO does |
 |-------|----------|-------------------|
-| Untranslated aria-labels | Critical | Translates to **natural spoken language** — not a literal translation, what a native blind user actually expects to hear |
-| Untranslated sr-only text | Critical | Localizes visually-hidden text screen readers rely on; culturally adapted for the locale's conventions |
-| Untranslated alt text | Warning | Translates image descriptions for screen readers + image SEO in the target locale |
-| Missing nav labels | Warning | Multiple `<nav>` elements without distinguishing `aria-label` — screen reader users can't tell nav sections apart |
-| Missing skip link | Warning | No skip-to-main-content — keyboard navigation dead end |
-| Decorative not hidden | Info | Emoji/icons not marked `aria-hidden="true"` — screen readers pronounce Unicode names in English mid-sentence |
-| Icon fonts exposed | Info | Font Awesome icons without `aria-hidden` — "icon icon-check" read aloud |
+| Untranslated aria-labels | Critical | Rewrites them as natural spoken language for a native blind user — not a word-for-word translation |
+| Untranslated sr-only text | Critical | Translates the hidden text screen readers rely on |
+| Untranslated alt text | Warning | Translates image descriptions — both for screen readers and image search SEO |
+| Multiple navs without labels | Warning | Blind users can't tell navigation sections apart without distinguishing labels |
+| No skip-to-content link | Warning | Keyboard and screen reader users get stuck tabbing through the whole nav on every page |
+| Decorative emoji not hidden | Info | Emoji without `aria-hidden="true"` get read aloud by screen readers — "SPARKLES" in English mid-Japanese-sentence |
+| Icon fonts exposed | Info | Font Awesome icons without `aria-hidden` — screen readers read "icon icon-check" aloud |
 
 ---
 
-## Three Translation Modes
+## Three Fix Modes
 
-| Mode | lingo.dev SDK Method | What Gets Fixed | Gemini Prompt Context |
-|------|---------------------|----------------|----------------------|
-| **SEO** | `localizeObject()` | Titles, descriptions, OG tags, Twitter cards, headings, alt text, JSON-LD, hreflang | Search intent — keywords people actually search per market |
-| **ARIA** | `localizeObject()` | aria-label attributes, sr-only text, screen reader content | Spoken language — natural, native, not translated |
-| **Full Page** | `localizeHtml()` + `localizeObject()` | Everything above + all visible body text, nav links, buttons, pricing, footer | Cultural adaptation — tone, formality, vocabulary for the locale |
+Pick what you want to fix:
 
-All three modes run through the lingo.dev SDK's `apiUrl` — the endpoint auto-detects which context to apply per string based on the key names.
+| Mode | What gets fixed |
+|------|----------------|
+| **SEO** | Page titles, meta descriptions, social sharing tags, headings, image alt text, structured data, hreflang tags |
+| **ARIA** | All screen reader text — aria-labels, sr-only text, accessibility attributes |
+| **Full Page** | Everything above, plus all visible text on the page — nav links, buttons, pricing cards, footer, badges |
 
 ---
 
-## SEO Score (0-100, Grade A-F)
+## Your Score (0-100, Grade A–F)
 
-Every scan produces a weighted score across 5 categories:
+Every scan gives your repo a score across 5 areas:
 
 ```
 ╔═══════════════════════════════════════════════════════╗
 ║  CATEGORY          │ WEIGHT │ WHAT IT MEASURES        ║
 ╠═══════════════════════════════════════════════════════╣
-║  Technical SEO     │  22%   │ html-lang, canonical,   ║
+║  Technical SEO     │  22%   │ language tags, canonical║
 ║                    │        │ viewport, hreflang      ║
 ╠═══════════════════════════════════════════════════════╣
 ║  On-Page SEO       │  23%   │ title, description,     ║
-║                    │        │ OG, Twitter, headings   ║
+║                    │        │ social tags, headings   ║
 ╠═══════════════════════════════════════════════════════╣
 ║  Accessibility     │  20%   │ alt text, aria-labels,  ║
-║                    │        │ sr-only, ARIA landmarks ║
+║                    │        │ screen reader text      ║
 ╠═══════════════════════════════════════════════════════╣
-║  Schema            │  10%   │ JSON-LD validity,       ║
-║                    │        │ sitemap locale support   ║
+║  Schema            │  10%   │ structured data,        ║
+║                    │        │ sitemap locale support  ║
 ╠═══════════════════════════════════════════════════════╣
-║  i18n Readiness    │  25%   │ hreflang, locale config,║
-║                    │        │ translation completeness ║
+║  i18n Readiness    │  25%   │ hreflang, locale setup, ║
+║                    │        │ translation completeness║
 ╚═══════════════════════════════════════════════════════╝
 ```
 
-Severity deductions: **Critical = -15 pts**, **Warning = -8 pts**, **Info = -2 pts**
+Deductions: Critical issues cost 15 points, warnings cost 8, info items cost 2.
 
 ---
 
-## Smart Features
+## A Few Smart Details
 
-### Brand Protection
-Reads `package.json` to identify your real brand name — the one source file that's never translated. If a previous run corrupted "InvoiceFlow" to "FacturaFlujo" (Spanish) or "请求流" (Chinese), LingoSEO detects and reverts it.
+**Brand protection.** LingoSEO reads your `package.json` to find your real brand name — that's the one file that never gets translated. If a previous run corrupted "InvoiceFlow" to "FacturaFlujo" in Spanish, it catches it and reverts it.
 
-### Mixed-Language Cleanup
-After running localization tools multiple times, files end up with 3-5 languages mixed together. LingoSEO's Gemini prompt auto-detects each string's language individually. If it's not in the target locale, it gets translated. If it is, it stays. The result is 100% target language with zero residue.
+**Mixed-language cleanup.** Run translation tools a few times in a row and files end up with 3-5 languages mixed in. LingoSEO detects each string's language individually and only translates the ones that don't already match the target.
 
-### Gemini Source Language Detection
-Never trusts `<html lang>` (it's often stale or wrong from previous runs). Instead, Gemini analyzes actual text content from the main files to identify the dominant language and passes it to the SDK as a hint.
-
-### Font Awesome CDN Injection
-If the tool detects `fa-` icon classes but no Font Awesome stylesheet is loaded, it automatically injects the CDN link so icons render correctly — and so they can be properly hidden with `aria-hidden`.
-
----
-
-## Architecture
-
-```
-app/
-├── page.tsx                    # Landing page
-├── dashboard/page.tsx          # Main dashboard (scan + fix UI)
-├── api/
-│   ├── analyze/route.ts        # Clone → scan → score
-│   ├── fix/route.ts            # Clone → fix → push → PR
-│   ├── process/localize/       # lingo.dev SDK contract endpoint
-│   │   └── route.ts            #   SEO + ARIA + cultural Gemini prompts
-│   ├── gemini/models/route.ts  # List available Gemini models
-│   └── users/me/route.ts       # SDK identity tracking
-│
-lib/
-├── analysis/
-│   ├── engine.ts               # Scan orchestrator
-│   ├── scanners/index.ts       # 20 Cheerio-based pattern scanners
-│   └── gemini-scanner.ts       # Gemini semantic scanner (content-level)
-├── fixer/
-│   └── engine.ts               # 3-step extract→translate→replace pipeline
-├── translation/
-│   ├── lingo-client.ts         # lingo.dev SDK wrapper (custom apiUrl)
-│   └── seo-optimizer.ts        # Gemini calls, scoring, hreflang generation
-├── github/
-│   ├── clone.ts                # Authenticated repo cloning
-│   └── pr.ts                   # Branch creation + PR generation
-└── logger.ts                   # Structured logging
-
-auth.ts                         # NextAuth v5 (GitHub OAuth)
-types/index.ts                  # TypeScript definitions
-```
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| Framework | Next.js 16, React 19, TypeScript |
-| Translation | **lingo.dev SDK** (`LingoDotDevEngine`, custom `apiUrl`) |
-| AI | Google Gemini 2.5 Flash — SEO, ARIA, cultural context prompts |
-| HTML Parsing | Cheerio (scanning), lingo.dev SDK `localizeHtml()` (translation) |
-| Auth | NextAuth v5 (GitHub OAuth) |
-| Git | simple-git, Octokit |
-| Styling | Tailwind CSS 4 + inline styles (terminal-brutalist aesthetic) |
-| Validation | Zod |
+**It doesn't trust `<html lang>`** — that attribute is often stale or wrong. Gemini reads the actual text content to figure out what language the page really is.
 
 ---
 
 ## Getting Started
 
-### Prerequisites
-- Node.js 18+
-- A GitHub account
-- A Google Gemini API key ([get one here](https://aistudio.google.com/apikey))
-
-### Setup
+You'll need Node.js 18+, a GitHub account, and a free [Gemini API key](https://aistudio.google.com/apikey).
 
 ```bash
 git clone https://github.com/your-username/lingoseo.git
@@ -306,61 +214,52 @@ npm install
 Create `.env.local`:
 
 ```env
-# Required
 GEMINI_API_KEY=your_gemini_api_key
 AUTH_GITHUB_ID=your_github_oauth_app_id
 AUTH_GITHUB_SECRET=your_github_oauth_app_secret
-AUTH_SECRET=any_random_string_for_session_encryption
+AUTH_SECRET=any_random_string
 
 # Optional
-GEMINI_MODEL=gemini-2.5-flash          # Default model
-NEXT_PUBLIC_APP_URL=http://localhost:3000  # Base URL for SDK callbacks
+GEMINI_MODEL=gemini-2.5-flash
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
-
-### Run
 
 ```bash
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Sign in with GitHub. Paste a repo URL. Scan. Fix. Merge the PR.
+Open [http://localhost:3000](http://localhost:3000). Sign in with GitHub. Paste a repo URL. Scan. Fix. Merge.
 
 ---
 
-## Demo: 8-Pass Translation Stress Test
+## Supported Languages
 
-LingoSEO was pushed through 8 consecutive translation passes on the same repo — each pass a different language — to stress-test mixed-language handling, brand protection, and ARIA coverage:
-
-| Pass | Direction | Coverage | Notes |
-|------|-----------|----------|-------|
-| 1 | EN → ES | ~50% | First translation — regex-based, many misses |
-| 2 | ES → JA | ~55% | Spanish residue from pass 1 |
-| 3 | JA → ZH-Hant | ~60% | Japanese + Spanish fragments mixed |
-| 4 | ZH → KO | ~60% | Three languages mixed on one page |
-| 5 | KO → HI | ~65% | Four languages coexisting; ARIA labels still in English |
-| 6 | HI → RU | **~97%** | Switched to 3-step Gemini pipeline — massive jump; all aria-labels translated |
-| 7 | RU → AR | **~99%** | Brand corruption fixed, Font Awesome CDN added, zero page.tsx residue |
-| 8 | — | **~99%** | Only 3 fossil strings in layout.tsx |
-
-**Key result:** After switching from regex-based extraction to the 3-step Gemini pipeline in pass 6, coverage jumped from ~65% to ~97% in a single run — including ARIA labels that regex had missed across all 5 previous passes.
+Arabic, Chinese (Simplified), Chinese (Traditional), Dutch, French, French (Canada), German, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese (Brazil), Portuguese (Portugal), Russian, Spanish, Spanish (Mexico), Spanish (Argentina), Swedish, Turkish, Ukrainian, Vietnamese — plus any language code the lingo.dev SDK supports.
 
 ---
 
-## Supported Locales
+## Tech Stack
 
-Arabic, Chinese (Simplified), Chinese (Traditional), Dutch, French, French (Canada), German, Hindi, Indonesian, Italian, Japanese, Korean, Polish, Portuguese (Brazil), Portuguese (Portugal), Russian, Spanish, Spanish (Mexico), Spanish (Argentina), Swedish, Turkish, Ukrainian, Vietnamese — and any BCP-47 locale code the lingo.dev SDK supports.
+| | |
+|--|--|
+| Framework | Next.js 16, React 19, TypeScript |
+| Translation | lingo.dev SDK (`LingoDotDevEngine`, custom `apiUrl`) |
+| AI | Google Gemini 2.5 Flash |
+| Scanning | Cheerio for pattern matching, Gemini for semantic analysis |
+| Auth | NextAuth v5 (GitHub OAuth) |
+| Git | simple-git, Octokit |
 
 ---
 
 ## The lingo.dev Connection
 
-[lingo.dev](https://lingo.dev) is a **Localization Engineering Platform** (YC F24, $4.2M seed) that turns any LLM into a stateful translation API. Their SDK's `apiUrl` feature is the architectural backbone of LingoSEO — it lets LingoSEO replace the default translation engine with its own while keeping all the SDK's plumbing (DOM parsing, object traversal, batching, locale validation) intact.
+[lingo.dev](https://lingo.dev) (YC F24) built an SDK that separates translation infrastructure from translation intelligence. Their `apiUrl` feature lets you swap in your own endpoint — you keep all the SDK's plumbing (HTML parsing, batching, locale validation) and bring your own brain.
 
-LingoSEO is the answer to a question the SDK makes possible: **what if every translation call knew whether it was translating for a search engine, a screen reader, or a human — and adapted accordingly?**
+LingoSEO is what happens when that brain knows the difference between a search engine, a screen reader, and a human — and writes differently for each one.
 
 ---
 
 <p align="center">
   Built for the <a href="https://lingo.dev">lingo.dev</a> Hackathon<br/>
-  <strong>lingo.dev SDK</strong> + <strong>Google Gemini</strong> + <strong>GitHub</strong> = multilingual SEO + ARIA on autopilot
+  <strong>lingo.dev SDK</strong> + <strong>Google Gemini</strong> + <strong>GitHub</strong> = multilingual SEO + accessibility on autopilot
 </p>

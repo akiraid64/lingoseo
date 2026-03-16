@@ -14,7 +14,8 @@
       "WebFetch(domain:www.wemakedevs.org)",
       "WebFetch(domain:hackathon.dev)",
       "WebFetch(domain:apidog.com)",
-      "WebFetch(domain:www.ycombinator.com)"
+      "WebFetch(domain:www.ycombinator.com)",
+      "Bash(npx skills:*)"
     ]
   }
 }
